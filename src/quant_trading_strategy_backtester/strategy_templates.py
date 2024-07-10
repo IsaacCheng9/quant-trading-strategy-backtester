@@ -27,7 +27,7 @@ class MovingAverageCrossoverStrategy(Strategy):
             .rolling(window=self.long_window, min_periods=1, center=False)
             .mean()
         )
-        signals.loc[signals["short_mvg"] > signals["long_mavg"], "signal"] = 1.0
+        signals.loc[signals["short_mavg"] > signals["long_mavg"], "signal"] = 1.0
         signals["positions"] = signals["signal"].diff()
 
         return signals
