@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.12.x]
+
+    steps:
+      - uses: actions/checkout@main
+
+      - name: Switch to current branch
+        run: git checkout ${{ env.BRANCH }}
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@main
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Poetry
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+
+      - name: Install Python dependencies with Poetry
+        run: |
+          poetry install
+
+      - name: Run unit tests with Pytest
+        run: poetry run coverage run --source=src/quant_trading_strategy_backtester -m pytest -v
+
+      - name: Get code coverage report
+        run: poetry run coverage report -m
