@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "quant-trading-strategy-backtester"
+version = "0.1.0"
+description = "A Python-based quantitative trading strategy backtester with an interactive dashboard. Enables users to implement, test, and visualise trading strategies using historical market data, featuring customisable parameters and key performance metrics."
+authors = ["Isaac Cheng <47993930+IsaacCheng9@users.noreply.github.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+streamlit = "^1.36.0"
+pandas = "^2.2.2"
+numpy = "^2.0.0"
+yfinance = "^0.2.40"
+plotly = "^5.22.0"
+
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.5.1"
+pytest = "^8.2.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
