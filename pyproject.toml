@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "quant-trading-strategy-backtester"
 version = "0.1.0"
-description = "A Python-based quantitative trading strategy backtester with an interactive dashboard. Enables users to implement, test, and visualise trading strategies using historical market data, featuring customisable parameters and key performance metrics."
+description = "A quantitative trading strategy backtester with an interactive dashboard. Enables users to implement, test, and visualise trading strategies using historical market data, featuring customisable parameters and key performance metrics. Developed with Python."
 authors = ["Isaac Cheng <47993930+IsaacCheng9@users.noreply.github.com>"]
 readme = "README.md"
 
