@@ -18,11 +18,7 @@ def load_yfinance_data(
     return data
 
 
-def main():
-    st.title("Quant Trading Strategy Backtester")
-
-    # Generate a sidebar for user inputs.
-    st.sidebar.header("Strategy Parameters")
+def get_user_inputs() -> tuple[str, datetime.date, datetime.date, int, int]:
     ticker: str = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
     start_date: datetime.date = cast(
         datetime.date,
@@ -38,29 +34,31 @@ def main():
     long_window: int = st.sidebar.slider(
         "Long Window", min_value=20, max_value=200, value=50
     )
+    return ticker, start_date, end_date, short_window, long_window
 
-    # Load the market data from Yahoo Finance.
-    data = load_yfinance_data(ticker, start_date, end_date)
-    if data is None or data.empty:
-        st.write("No data available for the selected ticker and date range.")
 
-    # Create the strategy and run the backtest.
+def run_backtest(
+    data: pd.DataFrame, short_window: int, long_window: int
+) -> tuple[pd.DataFrame, dict]:
     strategy = MovingAverageCrossoverStrategy(short_window, long_window)
     backtester = Backtester(data, strategy)
     results = backtester.run()
-
-    # Summarise the performance metrics.
-    st.header("Backtest Results")
     metrics = backtester.get_performance_metrics()
     assert (
         metrics is not None
     ), "No results available for the selected ticker and date range."
+    return results, metrics
+
+
+def display_metrics(metrics: dict) -> None:
+    st.header("Backtest Results")
     total_return_col, sharpe_ratio_col, max_drawdown_col = st.columns(3)
     total_return_col.metric("Total Return", f"{metrics['Total Return']:.2%}")
     sharpe_ratio_col.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.2f}")
     max_drawdown_col.metric("Max Drawdown", f"{metrics['Max Drawdown']:.2%}")
 
-    # Draw a graph of the equity curve.
+
+def plot_equity_curve(results: pd.DataFrame, ticker: str) -> None:
     st.subheader("Equity Curve")
     fig = go.Figure(
         data=go.Scatter(x=results.index, y=results["equity_curve"], mode="lines")
@@ -72,19 +70,34 @@ def main():
     )
     st.plotly_chart(fig)
 
-    # Draw a graph of the strategy returns.
+
+def plot_strategy_returns(results: pd.DataFrame, ticker: str) -> None:
     st.subheader("Strategy Returns")
-    returns_fig = go.Figure(
+    fig = go.Figure(
         data=go.Scatter(x=results.index, y=results["strategy_returns"], mode="lines")
     )
-    returns_fig.update_layout(
-        title=f"{ticker} Strategy Returns",
-        xaxis_title="Date",
-        yaxis_title="Returns",
+    fig.update_layout(
+        title=f"{ticker} Strategy Returns", xaxis_title="Date", yaxis_title="Returns"
     )
-    st.plotly_chart(returns_fig)
+    st.plotly_chart(fig)
 
-    # Display the raw market data in a table.
+
+def main():
+    st.title("Quant Trading Strategy Backtester")
+
+    ticker, start_date, end_date, short_window, long_window = get_user_inputs()
+
+    data = load_yfinance_data(ticker, start_date, end_date)
+    if data is None or data.empty:
+        st.write("No data available for the selected ticker and date range.")
+        return
+
+    results, metrics = run_backtest(data, short_window, long_window)
+
+    display_metrics(metrics)
+    plot_equity_curve(results, ticker)
+    plot_strategy_returns(results, ticker)
+
     st.subheader("Raw Data")
     st.write(data)
 
