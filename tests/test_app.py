@@ -21,6 +21,6 @@ def test_run_backtest(mock_data):
     results, metrics = run_backtest(mock_data, 5, 20)
     assert isinstance(results, pd.DataFrame)
     assert isinstance(metrics, dict)
-    assert "Total Return" in metrics
-    assert "Sharpe Ratio" in metrics
-    assert "Max Drawdown" in metrics
+    EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
+    for metric in EXPECTED_METRICS:
+        assert metric in metrics

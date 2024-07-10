@@ -18,9 +18,9 @@ def test_backtester_run(mock_data):
     backtester = Backtester(mock_data, strategy)
     results = backtester.run()
     assert isinstance(results, pd.DataFrame)
-    assert "positions" in results.columns
-    assert "strategy_returns" in results.columns
-    assert "equity_curve" in results.columns
+    EXPECTED_COLS = {"positions", "strategy_returns", "equity_curve"}
+    for col in EXPECTED_COLS:
+        assert col in results.columns
 
 
 def test_backtester_get_performance_metrics(mock_data):
@@ -29,6 +29,6 @@ def test_backtester_get_performance_metrics(mock_data):
     backtester.run()
     metrics = backtester.get_performance_metrics()
     assert isinstance(metrics, dict)
-    assert "Total Return" in metrics
-    assert "Sharpe Ratio" in metrics
-    assert "Max Drawdown" in metrics
+    EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
+    for metric in EXPECTED_METRICS:
+        assert metric
