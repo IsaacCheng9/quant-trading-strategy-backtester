@@ -20,7 +20,7 @@ class Strategy(ABC):
     """
 
     @abstractmethod
-    def generate_signals(self, data) -> pd.DataFrame:
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Generate trading signals based on the input data.
 
