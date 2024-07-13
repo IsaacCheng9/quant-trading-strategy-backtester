@@ -1,3 +1,11 @@
+"""
+Defines abstract and concrete classes for trading strategies.
+
+It provides a framework for creating and implementing various trading
+strategies. These templates can be used as a template to develop and test
+different quantitative trading strategies.
+"""
+
 from abc import ABC, abstractmethod
 
 import pandas as pd
