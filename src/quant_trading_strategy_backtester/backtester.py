@@ -1,3 +1,11 @@
+"""
+A backtesting framework for quantitative trading strategies.
+
+It provides a Backtester class that can run a given trading strategy on
+historical data and calculate various performance metrics. This framework is
+designed to work with the strategy templates defined in a different module in
+this repository.
+"""
 import numpy as np
 import pandas as pd
 from quant_trading_strategy_backtester.strategy_templates import Strategy
