@@ -101,7 +101,7 @@ def get_user_inputs_for_strategy_params(strategy_type: str) -> dict[str, float]:
 
 
 def run_backtest(
-    data: pd.DataFrame, strategy_type: str, **strategy_params: dict[str, float]
+    data: pd.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
 ) -> tuple[pd.DataFrame, dict]:
     """
     Executes the backtest using the selected strategy and parameters.
@@ -109,15 +109,15 @@ def run_backtest(
     Args:
         data: Historical stock data.
         strategy_type: The type of strategy to use for the backtest.
-        **strategy_params: Additional parameters required for the strategy.
+        strategy_params: Additional parameters required for the strategy.
 
     Returns:
         A tuple containing the backtest results DataFrame and performance metrics.
     """
     if strategy_type == "Moving Average Crossover":
-        strategy = MovingAverageCrossoverStrategy(**strategy_params)
+        strategy = MovingAverageCrossoverStrategy(strategy_params)
     elif strategy_type == "Mean Reversion":
-        strategy = MeanReversionStrategy(**strategy_params)
+        strategy = MeanReversionStrategy(strategy_params)
     else:
         raise ValueError("Invalid strategy type")
 
@@ -202,7 +202,7 @@ def main():
     if data is None or data.empty:
         st.write("No data available for the selected ticker and date range.")
         return
-    results, metrics = run_backtest(data, strategy_type, **strategy_params)
+    results, metrics = run_backtest(data, strategy_type, strategy_params)
 
     display_performance_metrics(metrics)
     plot_equity_curve(results, ticker)

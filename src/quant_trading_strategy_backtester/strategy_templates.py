@@ -7,6 +7,7 @@ different quantitative trading strategies.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import pandas as pd
 
@@ -45,9 +46,9 @@ class MeanReversionStrategy(Strategy):
         std_dev: The number of standard deviations to use for the price bands.
     """
 
-    def __init__(self, window: int, std_dev: float):
-        self.window = window
-        self.std_dev = std_dev
+    def __init__(self, params: dict[str, Any]):
+        self.window = int(params["window"])
+        self.std_dev = float(params["std_dev"])
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -92,9 +93,9 @@ class MovingAverageCrossoverStrategy(Strategy):
         long_window: The number of periods for the long-term moving average.
     """
 
-    def __init__(self, short_window: int, long_window: int):
-        self.short_window = short_window
-        self.long_window = long_window
+    def __init__(self, params: dict[str, Any]):
+        self.short_window = int(params["short_window"])
+        self.long_window = int(params["long_window"])
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
