@@ -9,6 +9,7 @@ different quantitative trading strategies.
 from abc import ABC, abstractmethod
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -68,8 +69,13 @@ class MeanReversionStrategy(Strategy):
             'positions'.
         """
         signals = pd.DataFrame(index=data.index)
-        signals["mean"] = data["Close"].rolling(window=self.window).mean()
-        signals["std"] = data["Close"].rolling(window=self.window).std()
+        signals["mean"] = (
+            data["Close"].rolling(window=self.window, min_periods=1).mean()
+        )
+        signals["std"] = data["Close"].rolling(window=self.window, min_periods=1).std()
+        # Avoid division by zero.
+        signals["std"] = signals["std"].replace(0, np.nan)
+
         signals["upper_band"] = signals["mean"] + (self.std_dev * signals["std"])
         signals["lower_band"] = signals["mean"] - (self.std_dev * signals["std"])
 
@@ -78,6 +84,9 @@ class MeanReversionStrategy(Strategy):
         signals.loc[data["Close"] < signals["lower_band"], "signal"] = 1.0
         # Sell signal
         signals.loc[data["Close"] > signals["upper_band"], "signal"] = -1.0
+
+        # Fill NaN values with 0 (no signal)
+        signals["signal"] = signals["signal"].fillna(0)
         signals["positions"] = signals["signal"].diff()
 
         return signals
