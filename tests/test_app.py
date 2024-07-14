@@ -1,5 +1,7 @@
 import datetime
+
 import pandas as pd
+import pytest
 from quant_trading_strategy_backtester.app import load_yfinance_data, run_backtest
 
 
@@ -17,8 +19,16 @@ def test_load_yfinance_data(monkeypatch, mock_data):
     assert "Close" in data.columns
 
 
-def test_run_backtest(mock_data):
-    results, metrics = run_backtest(mock_data, 5, 20)
+@pytest.mark.parametrize(
+    "strategy_type", ["Moving Average Crossover", "Mean Reversion"]
+)
+def test_run_backtest(mock_data, strategy_type):
+    params = (
+        {"short_window": 5, "long_window": 20}
+        if strategy_type == "Moving Average Crossover"
+        else {"window": 5, "std_dev": 2.0}
+    )
+    results, metrics = run_backtest(mock_data, strategy_type, **params)
     assert isinstance(results, pd.DataFrame)
     assert isinstance(metrics, dict)
     EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
