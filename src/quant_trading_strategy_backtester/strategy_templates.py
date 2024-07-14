@@ -33,6 +33,28 @@ class Strategy(ABC):
         raise NotImplementedError("Method 'generate_signals' must be implemented.")
 
 
+class MeanReversionStrategy(Strategy):
+    def __init__(self, window: int, std_dev: float):
+        self.window = window
+        self.std_dev = std_dev
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        signals = pd.DataFrame(index=data.index)
+        signals["mean"] = data["Close"].rolling(window=self.window).mean()
+        signals["std"] = data["Close"].rolling(window=self.window).std()
+        signals["upper_band"] = signals["mean"] + (self.std_dev * signals["std"])
+        signals["lower_band"] = signals["mean"] - (self.std_dev * signals["std"])
+
+        signals["signal"] = 0.0
+        signals.loc[data["Close"] < signals["lower_band"], "signal"] = 1.0  # Buy signal
+        signals.loc[
+            data["Close"] > signals["upper_band"], "signal"
+        ] = -1.0  # Sell signal
+        signals["positions"] = signals["signal"].diff()
+
+        return signals
+
+
 class MovingAverageCrossoverStrategy(Strategy):
     """
     Generates buy and sell signals based on the crossover of short-term and
