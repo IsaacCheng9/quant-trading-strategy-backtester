@@ -11,6 +11,11 @@ metrics. Developed with Python.
 _Try the deployed app
 [here!](https://quant-trading-strategy-backtester.streamlit.app/)_
 
+## Trading Strategies Supported
+
+- Mean Reversion
+- Moving Average Crossover
+
 ## Usage
 
 ### Installing Dependencies
