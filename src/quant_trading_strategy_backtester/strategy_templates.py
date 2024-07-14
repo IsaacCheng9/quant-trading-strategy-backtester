@@ -7,7 +7,9 @@ different quantitative trading strategies.
 """
 
 from abc import ABC, abstractmethod
+from typing import Any
 
+import numpy as np
 import pandas as pd
 
 
@@ -18,6 +20,11 @@ class Strategy(ABC):
     This class defines the interface for all trading strategies. Subclasses
     must implement the generate_signals method.
     """
+
+    # TODO: Consider setting the params back to indivdual attributes. Would this be easier to read?
+    @abstractmethod
+    def __init__(self, params: dict[str, Any]):
+        raise NotImplementedError("Method '__init__' must be implemented.")
 
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -33,19 +40,79 @@ class Strategy(ABC):
         raise NotImplementedError("Method 'generate_signals' must be implemented.")
 
 
+class MeanReversionStrategy(Strategy):
+    """
+    Generates buy and sell signals based on the assumption that asset prices
+    tend to revert to their mean over time. It uses a moving average and
+    standard deviation to create upper and lower price bands.
+
+    Attributes:
+        params: A dictionary containing the strategy parameters.
+    """
+
+    def __init__(self, params: dict[str, Any]):
+        # The number of days to calculate the moving average and standard
+        # deviation.
+        self.window = int(params["window"])
+        # The number of standard deviations to use for the price bands. This
+        # sets the upper and lower bands for buy and sell signals
+        # (mean +/- std_dev).
+        self.std_dev = float(params["std_dev"])
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generates trading signals for the given data.
+
+        Generates a buy signal (1) when the price falls below the lower band,
+        and generates a sell signal (-1) when the price rises above the upper
+        band. The strategy assumes mean reversion will occur.
+
+        Args:
+            data: A DataFrame containing the price data. Must have a 'Close'
+                  column.
+
+        Returns:
+            A DataFrame containing the generated trading signals. Columns
+            include 'signal', 'mean', 'std', 'upper_band', 'lower_band', and
+            'positions'.
+        """
+        signals = pd.DataFrame(index=data.index)
+        signals["mean"] = (
+            data["Close"].rolling(window=self.window, min_periods=1).mean()
+        )
+        signals["std"] = data["Close"].rolling(window=self.window, min_periods=1).std()
+        # Avoid division by zero.
+        signals["std"] = signals["std"].replace(0, np.nan)
+
+        signals["upper_band"] = signals["mean"] + (self.std_dev * signals["std"])
+        signals["lower_band"] = signals["mean"] - (self.std_dev * signals["std"])
+
+        signals["signal"] = 0.0
+        # Buy signal
+        signals.loc[data["Close"] < signals["lower_band"], "signal"] = 1.0
+        # Sell signal
+        signals.loc[data["Close"] > signals["upper_band"], "signal"] = -1.0
+
+        # Fill NaN values with 0 (no signal)
+        signals["signal"] = signals["signal"].fillna(0)
+        signals["positions"] = signals["signal"].diff()
+
+        return signals
+
+
 class MovingAverageCrossoverStrategy(Strategy):
     """
     Generates buy and sell signals based on the crossover of short-term and
     long-term moving averages of the closing price.
 
     Attributes:
-        short_window: The number of periods for the short-term moving average.
-        long_window: The number of periods for the long-term moving average.
+        params: A dictionary containing the strategy parameters.
     """
 
-    def __init__(self, short_window: int, long_window: int):
-        self.short_window = short_window
-        self.long_window = long_window
+    def __init__(self, params: dict[str, Any]):
+        # The number of days for the short-term and long-term moving average.
+        self.short_window = int(params["short_window"])
+        self.long_window = int(params["long_window"])
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -76,7 +143,11 @@ class MovingAverageCrossoverStrategy(Strategy):
             .rolling(window=self.long_window, min_periods=1, center=False)
             .mean()
         )
+        # If the short-term moving average is above the long-term moving
+        # average, generate a buy signal.
         signals.loc[signals["short_mavg"] > signals["long_mavg"], "signal"] = 1.0
+        # If the short-term moving average is below the long-term moving
+        # average, generate a sell signal by setting all non-buy signals to -1.
         signals["positions"] = signals["signal"].diff()
 
         return signals

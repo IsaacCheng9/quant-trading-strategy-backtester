@@ -67,6 +67,10 @@ class Backtester:
         portfolio["strategy_returns"] = (
             portfolio["positions"].shift(1) * portfolio["asset_returns"]
         )
+        # Handle potential NaN or inf values
+        portfolio["strategy_returns"] = (
+            portfolio["strategy_returns"].replace([np.inf, -np.inf], np.nan).fillna(0)
+        )
         portfolio["cumulative_returns"] = (1 + portfolio["strategy_returns"]).cumprod()
         portfolio["equity_curve"] = (
             self.initial_capital * portfolio["cumulative_returns"]
@@ -89,16 +93,20 @@ class Backtester:
             return None
 
         total_return = self.results["cumulative_returns"].iloc[-1] - 1
+
         # Measure the risk-adjusted return, assuming 252 trading days per year.
-        sharpe_ratio = (
-            np.sqrt(252)
-            * self.results["strategy_returns"].mean()
-            / self.results["strategy_returns"].std()
-        )
+        returns_mean = self.results["strategy_returns"].mean()
+        returns_std = self.results["strategy_returns"].std()
+        if returns_std != 0 and not np.isnan(returns_std):
+            sharpe_ratio = np.sqrt(252) * returns_mean / returns_std
+        else:
+            sharpe_ratio = np.nan
+
         # Measure the maximum loss from a peak to a trough of the equity curve.
-        max_drawdown = (
+        drawdowns = (
             self.results["equity_curve"] / self.results["equity_curve"].cummax() - 1
-        ).min()
+        )
+        max_drawdown = drawdowns.min()
 
         return {
             "Total Return": total_return,
