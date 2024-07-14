@@ -9,7 +9,7 @@ equity curve, and strategy returns using interactive Plotly charts.
 For instructions on how to run the application, refer to the README.md.
 """
 
-from typing import cast
+from typing import Any, cast
 import datetime
 import pandas as pd
 import plotly.graph_objects as go
@@ -17,6 +17,7 @@ import streamlit as st
 import yfinance as yf
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.strategy_templates import (
+    MeanReversionStrategy,
     MovingAverageCrossoverStrategy,
 )
 
@@ -40,13 +41,15 @@ def load_yfinance_data(
     return data
 
 
-def get_user_inputs() -> tuple[str, datetime.date, datetime.date, int, int]:
+def get_user_inputs_except_strategy_parameters() -> (
+    tuple[str, datetime.date, datetime.date, str]
+):
     """
     Get user inputs from the Streamlit sidebar.
 
     Returns:
-        A tuple containing the ticker symbol, start date, end date, short
-        window, and long window for the moving average strategy.
+        A tuple containing the ticker symbol, start date, end date, and
+        strategy type.
     """
     ticker: str = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
     start_date: datetime.date = cast(
@@ -57,31 +60,37 @@ def get_user_inputs() -> tuple[str, datetime.date, datetime.date, int, int]:
         datetime.date,
         st.sidebar.date_input("End Date", value=pd.to_datetime("2023-12-31")),
     )
-    short_window: int = st.sidebar.slider(
-        "Short Window", min_value=5, max_value=50, value=20
+    # Set the default strategy type to 'Mean Reversion'.
+    strategy_type = cast(
+        str,
+        st.sidebar.selectbox(
+            "Strategy Type", ["Mean Reversion", "Moving Average Crossover"], index=0
+        ),
     )
-    long_window: int = st.sidebar.slider(
-        "Long Window", min_value=20, max_value=200, value=50
-    )
-    return ticker, start_date, end_date, short_window, long_window
+    return ticker, start_date, end_date, strategy_type
 
 
-# TODO: Change this to work with different strategies.
 def run_backtest(
-    data: pd.DataFrame, short_window: int, long_window: int
+    data: pd.DataFrame, strategy_type: str, **params: dict[str, Any]
 ) -> tuple[pd.DataFrame, dict]:
     """
-    Execute the backtest using the moving Average Crossover Strategy.
+    Execute the backtest using the selected strategy and parameters.
 
     Args:
         data: Historical stock data.
-        short_window: The short-term moving average window.
-        long_window: The long-term moving average window.
+        strategy_type: The type of strategy to use for the backtest.
+        **params: Additional parameters required for the strategy.
 
     Returns:
         A tuple containing the backtest results DataFrame and performance metrics.
     """
-    strategy = MovingAverageCrossoverStrategy(short_window, long_window)
+    if strategy_type == "Moving Average Crossover":
+        strategy = MovingAverageCrossoverStrategy(**params)
+    elif strategy_type == "Mean Reversion":
+        strategy = MeanReversionStrategy(**params)
+    else:
+        raise ValueError("Invalid strategy type")
+
     backtester = Backtester(data, strategy)
     results = backtester.run()
     metrics = backtester.get_performance_metrics()
@@ -152,14 +161,31 @@ def main():
     """
     st.title("Quant Trading Strategy Backtester")
 
-    ticker, start_date, end_date, short_window, long_window = get_user_inputs()
+    # Get user inputs for the backtest and strategy parameters.
+    ticker, start_date, end_date, strategy_type = (
+        get_user_inputs_except_strategy_parameters()
+    )
+    if strategy_type == "Moving Average Crossover":
+        short_window = st.sidebar.slider(
+            "Short Window", min_value=5, max_value=50, value=20
+        )
+        long_window = st.sidebar.slider(
+            "Long Window", min_value=20, max_value=200, value=50
+        )
+        params = {"short_window": short_window, "long_window": long_window}
+    elif strategy_type == "Mean Reversion":
+        window = st.sidebar.slider("Window", min_value=5, max_value=100, value=20)
+        std_dev = st.sidebar.slider(
+            "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
+        )
+        params = {"window": window, "std_dev": std_dev}
 
+    # Load the historical data ad run the backtest.
     data = load_yfinance_data(ticker, start_date, end_date)
     if data is None or data.empty:
         st.write("No data available for the selected ticker and date range.")
         return
-
-    results, metrics = run_backtest(data, short_window, long_window)
+    results, metrics = run_backtest(data, strategy_type, **params)
 
     display_performance_metrics(metrics)
     plot_equity_curve(results, ticker)
