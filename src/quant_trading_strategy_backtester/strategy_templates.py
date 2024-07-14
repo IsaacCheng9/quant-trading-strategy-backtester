@@ -34,11 +34,38 @@ class Strategy(ABC):
 
 
 class MeanReversionStrategy(Strategy):
+    """
+    Generates buy and sell signals based on the assumption that asset prices
+    tend to revert to their mean over time. It uses a moving average and
+    standard deviation to create upper and lower price bands.
+
+    Attributes:
+        window: The number of periods for calculating the moving average and
+                standard deviation.
+        std_dev: The number of standard deviations to use for the price bands.
+    """
+
     def __init__(self, window: int, std_dev: float):
         self.window = window
         self.std_dev = std_dev
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generates trading signals for the given data.
+
+        Generates a buy signal (1) when the price falls below the lower band,
+        and generates a sell signal (-1) when the price rises above the upper
+        band. The strategy assumes mean reversion will occur.
+
+        Args:
+            data: A DataFrame containing the price data. Must have a 'Close'
+                  column.
+
+        Returns:
+            A DataFrame containing the generated trading signals. Columns
+            include 'signal', 'mean', 'std', 'upper_band', 'lower_band', and
+            'positions'.
+        """
         signals = pd.DataFrame(index=data.index)
         signals["mean"] = data["Close"].rolling(window=self.window).mean()
         signals["std"] = data["Close"].rolling(window=self.window).std()
@@ -46,10 +73,10 @@ class MeanReversionStrategy(Strategy):
         signals["lower_band"] = signals["mean"] - (self.std_dev * signals["std"])
 
         signals["signal"] = 0.0
-        signals.loc[data["Close"] < signals["lower_band"], "signal"] = 1.0  # Buy signal
-        signals.loc[
-            data["Close"] > signals["upper_band"], "signal"
-        ] = -1.0  # Sell signal
+        # Buy signal
+        signals.loc[data["Close"] < signals["lower_band"], "signal"] = 1.0
+        # Sell signal
+        signals.loc[data["Close"] > signals["upper_band"], "signal"] = -1.0
         signals["positions"] = signals["signal"].diff()
 
         return signals
