@@ -84,14 +84,16 @@ def get_user_inputs_for_strategy_params(strategy_type: str) -> dict[str, float]:
     """
     if strategy_type == "Moving Average Crossover":
         short_window = st.sidebar.slider(
-            "Short Window", min_value=5, max_value=50, value=20
+            "Short Window (Days)", min_value=5, max_value=50, value=20
         )
         long_window = st.sidebar.slider(
-            "Long Window", min_value=20, max_value=200, value=50
+            "Long Window (Days)", min_value=20, max_value=200, value=50
         )
         params = {"short_window": short_window, "long_window": long_window}
     elif strategy_type == "Mean Reversion":
-        window = st.sidebar.slider("Window", min_value=5, max_value=100, value=20)
+        window = st.sidebar.slider(
+            "Window (Days)", min_value=5, max_value=100, value=20
+        )
         std_dev = st.sidebar.slider(
             "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
         )

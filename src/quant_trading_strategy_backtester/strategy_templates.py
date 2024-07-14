@@ -41,7 +41,7 @@ class MeanReversionStrategy(Strategy):
     standard deviation to create upper and lower price bands.
 
     Attributes:
-        window: The number of periods for calculating the moving average and
+        window: The number of days to calculate the moving average and
                 standard deviation.
         std_dev: The number of standard deviations to use for the price bands.
     """
@@ -89,8 +89,8 @@ class MovingAverageCrossoverStrategy(Strategy):
     long-term moving averages of the closing price.
 
     Attributes:
-        short_window: The number of periods for the short-term moving average.
-        long_window: The number of periods for the long-term moving average.
+        short_window: The number of days for the short-term moving average.
+        long_window: The number of days for the long-term moving average.
     """
 
     def __init__(self, params: dict[str, Any]):
@@ -126,7 +126,11 @@ class MovingAverageCrossoverStrategy(Strategy):
             .rolling(window=self.long_window, min_periods=1, center=False)
             .mean()
         )
+        # If the short-term moving average is above the long-term moving
+        # average, generate a buy signal.
         signals.loc[signals["short_mavg"] > signals["long_mavg"], "signal"] = 1.0
+        # If the short-term moving average is below the long-term moving
+        # average, generate a sell signal by setting all non-buy signals to -1.
         signals["positions"] = signals["signal"].diff()
 
         return signals
