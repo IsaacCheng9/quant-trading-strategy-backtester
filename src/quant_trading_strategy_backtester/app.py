@@ -1,3 +1,13 @@
+"""
+Implements a Streamlit web application for backtesting quantitative trading
+strategies.
+
+The application allows users to input a stock ticker, date range, and
+parameters for a strategy to backtest it. It displays performance metrics,
+equity curve, and strategy returns using interactive Plotly charts.
+
+For instructions on how to run the application, refer to the README.md.
+"""
 from typing import cast
 import datetime
 import pandas as pd
