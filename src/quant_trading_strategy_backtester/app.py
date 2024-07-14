@@ -8,6 +8,7 @@ equity curve, and strategy returns using interactive Plotly charts.
 
 For instructions on how to run the application, refer to the README.md.
 """
+
 from typing import cast
 import datetime
 import pandas as pd
@@ -24,11 +25,29 @@ from quant_trading_strategy_backtester.strategy_templates import (
 def load_yfinance_data(
     ticker: str, start_date: datetime.date, end_date: datetime.date
 ) -> pd.DataFrame:
+    """
+    Fetch historical stock data from Yahoo Finance.
+
+    Args:
+        ticker: The stock ticker symbol.
+        start_date: The start date for the data.
+        end_date: The end date for the data.
+
+    Returns:
+        A DataFrame containing the historical stock data.
+    """
     data = yf.download(ticker, start=start_date, end=end_date)
     return data
 
 
 def get_user_inputs() -> tuple[str, datetime.date, datetime.date, int, int]:
+    """
+    Get user inputs from the Streamlit sidebar.
+
+    Returns:
+        A tuple containing the ticker symbol, start date, end date, short
+        window, and long window for the moving average strategy.
+    """
     ticker: str = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
     start_date: datetime.date = cast(
         datetime.date,
@@ -47,9 +66,21 @@ def get_user_inputs() -> tuple[str, datetime.date, datetime.date, int, int]:
     return ticker, start_date, end_date, short_window, long_window
 
 
+# TODO: Change this to work with different strategies.
 def run_backtest(
     data: pd.DataFrame, short_window: int, long_window: int
 ) -> tuple[pd.DataFrame, dict]:
+    """
+    Execute the backtest using the moving Average Crossover Strategy.
+
+    Args:
+        data: Historical stock data.
+        short_window: The short-term moving average window.
+        long_window: The long-term moving average window.
+
+    Returns:
+        A tuple containing the backtest results DataFrame and performance metrics.
+    """
     strategy = MovingAverageCrossoverStrategy(short_window, long_window)
     backtester = Backtester(data, strategy)
     results = backtester.run()
@@ -60,7 +91,13 @@ def run_backtest(
     return results, metrics
 
 
-def display_metrics(metrics: dict) -> None:
+def display_performance_metrics(metrics: dict[str, float]) -> None:
+    """
+    Display key performance metrics of the backtest.
+
+    Args:
+        metrics: A dictionary containing performance metrics.
+    """
     st.header("Backtest Results")
     total_return_col, sharpe_ratio_col, max_drawdown_col = st.columns(3)
     total_return_col.metric("Total Return", f"{metrics['Total Return']:.2%}")
@@ -69,6 +106,13 @@ def display_metrics(metrics: dict) -> None:
 
 
 def plot_equity_curve(results: pd.DataFrame, ticker: str) -> None:
+    """
+    Plot the equity curve of the backtest.
+
+    Args:
+        results: The backtest results DataFrame.
+        ticker: The stock ticker symbol.
+    """
     st.subheader("Equity Curve")
     fig = go.Figure(
         data=go.Scatter(x=results.index, y=results["equity_curve"], mode="lines")
@@ -82,6 +126,13 @@ def plot_equity_curve(results: pd.DataFrame, ticker: str) -> None:
 
 
 def plot_strategy_returns(results: pd.DataFrame, ticker: str) -> None:
+    """
+    Plot the strategy returns over time.
+
+    Args:
+        results: The backtest results DataFrame.
+        ticker: The stock ticker symbol.
+    """
     st.subheader("Strategy Returns")
     fig = go.Figure(
         data=go.Scatter(x=results.index, y=results["strategy_returns"], mode="lines")
@@ -93,6 +144,12 @@ def plot_strategy_returns(results: pd.DataFrame, ticker: str) -> None:
 
 
 def main():
+    """
+    Orchestrates the Streamlit app flow.
+
+    Set up the user interface, collect inputs, runs the backtest, and displays
+    the results.
+    """
     st.title("Quant Trading Strategy Backtester")
 
     ticker, start_date, end_date, short_window, long_window = get_user_inputs()
@@ -104,7 +161,7 @@ def main():
 
     results, metrics = run_backtest(data, short_window, long_window)
 
-    display_metrics(metrics)
+    display_performance_metrics(metrics)
     plot_equity_curve(results, ticker)
     plot_strategy_returns(results, ticker)
 
