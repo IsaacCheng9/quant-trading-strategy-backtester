@@ -21,6 +21,11 @@ class Strategy(ABC):
     must implement the generate_signals method.
     """
 
+    # TODO: Consider setting the params back to indivdual attributes. Would this be easier to read?
+    @abstractmethod
+    def __init__(self, params: dict[str, Any]):
+        raise NotImplementedError("Method '__init__' must be implemented.")
+
     @abstractmethod
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -42,13 +47,16 @@ class MeanReversionStrategy(Strategy):
     standard deviation to create upper and lower price bands.
 
     Attributes:
-        window: The number of days to calculate the moving average and
-                standard deviation.
-        std_dev: The number of standard deviations to use for the price bands.
+        params: A dictionary containing the strategy parameters.
     """
 
     def __init__(self, params: dict[str, Any]):
+        # The number of days to calculate the moving average and standard
+        # deviation.
         self.window = int(params["window"])
+        # The number of standard deviations to use for the price bands. This
+        # sets the upper and lower bands for buy and sell signals
+        # (mean +/- std_dev).
         self.std_dev = float(params["std_dev"])
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -98,11 +106,11 @@ class MovingAverageCrossoverStrategy(Strategy):
     long-term moving averages of the closing price.
 
     Attributes:
-        short_window: The number of days for the short-term moving average.
-        long_window: The number of days for the long-term moving average.
+        params: A dictionary containing the strategy parameters.
     """
 
     def __init__(self, params: dict[str, Any]):
+        # The number of days for the short-term and long-term moving average.
         self.short_window = int(params["short_window"])
         self.long_window = int(params["long_window"])
 
