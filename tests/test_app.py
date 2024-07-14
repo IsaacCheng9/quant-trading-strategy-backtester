@@ -28,7 +28,7 @@ def test_run_backtest(mock_data, strategy_type):
         if strategy_type == "Moving Average Crossover"
         else {"window": 5, "std_dev": 2.0}
     )
-    results, metrics = run_backtest(mock_data, strategy_type, **params)
+    results, metrics = run_backtest(mock_data, strategy_type, params)
     assert isinstance(results, pd.DataFrame)
     assert isinstance(metrics, dict)
     EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}

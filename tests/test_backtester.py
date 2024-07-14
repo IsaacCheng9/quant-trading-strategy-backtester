@@ -8,14 +8,14 @@ from quant_trading_strategy_backtester.strategy_templates import (
 
 
 @pytest.mark.parametrize(
-    "strategy_class", [MovingAverageCrossoverStrategy, MeanReversionStrategy]
+    "strategy_class,params",
+    [
+        (MovingAverageCrossoverStrategy, {"short_window": 5, "long_window": 20}),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}),
+    ],
 )
-def test_backtester_initialization(mock_data, strategy_class):
-    strategy = (
-        strategy_class(5, 20)
-        if strategy_class == MovingAverageCrossoverStrategy
-        else strategy_class(5, 2.0)
-    )
+def test_backtester_initialization(mock_data, strategy_class, params):
+    strategy = strategy_class(params)
     backtester = Backtester(mock_data, strategy)
     assert backtester.data is mock_data
     assert isinstance(backtester.strategy, strategy_class)
@@ -23,14 +23,14 @@ def test_backtester_initialization(mock_data, strategy_class):
 
 
 @pytest.mark.parametrize(
-    "strategy_class", [MovingAverageCrossoverStrategy, MeanReversionStrategy]
+    "strategy_class,params",
+    [
+        (MovingAverageCrossoverStrategy, {"short_window": 5, "long_window": 20}),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}),
+    ],
 )
-def test_backtester_run(mock_data, strategy_class):
-    strategy = (
-        strategy_class(5, 20)
-        if strategy_class == MovingAverageCrossoverStrategy
-        else strategy_class(5, 2.0)
-    )
+def test_backtester_run(mock_data, strategy_class, params):
+    strategy = strategy_class(params)
     backtester = Backtester(mock_data, strategy)
     results = backtester.run()
     assert isinstance(results, pd.DataFrame)
@@ -40,14 +40,14 @@ def test_backtester_run(mock_data, strategy_class):
 
 
 @pytest.mark.parametrize(
-    "strategy_class", [MovingAverageCrossoverStrategy, MeanReversionStrategy]
+    "strategy_class,params",
+    [
+        (MovingAverageCrossoverStrategy, {"short_window": 5, "long_window": 20}),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}),
+    ],
 )
-def test_backtester_get_performance_metrics(mock_data, strategy_class):
-    strategy = (
-        strategy_class(5, 20)
-        if strategy_class == MovingAverageCrossoverStrategy
-        else strategy_class(5, 2.0)
-    )
+def test_backtester_get_performance_metrics(mock_data, strategy_class, params):
+    strategy = strategy_class(params)
     backtester = Backtester(mock_data, strategy)
     backtester.run()
     metrics = backtester.get_performance_metrics()
