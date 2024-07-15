@@ -235,6 +235,8 @@ def optimise_strategy_parameters(
             best_params = current_params
             best_metrics = metrics
 
+    if not best_params or not best_metrics:
+        raise ValueError("Parameter optimisation failed")
     return best_params, best_metrics
 
 
