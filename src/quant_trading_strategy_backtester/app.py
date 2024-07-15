@@ -76,7 +76,7 @@ def get_user_inputs_except_strategy_params() -> (
 
 def get_user_inputs_for_strategy_params(
     strategy_type: str,
-) -> tuple[bool, dict[str, float]]:
+) -> tuple[bool, dict[str, float] | dict[str, range] | dict[str, list[float]]]:
     """
     Gets user inputs for the strategy parameters from the Streamlit sidebar
     based on the selected strategy.
@@ -202,9 +202,11 @@ def plot_strategy_returns(results: pd.DataFrame, ticker: str) -> None:
     st.plotly_chart(fig)
 
 
-def optimise_strategy_parameters(
-    data: pd.DataFrame, strategy_type: str, parameter_ranges: dict[str, list[Any]]
-) -> tuple[dict[str, Any], dict[str, float]]:
+def optimise_strategy_params(
+    data: pd.DataFrame,
+    strategy_type: str,
+    parameter_ranges: dict[str, range] | dict[str, list[float]],
+) -> tuple[dict[str, int] | dict[str, float], dict[str, float]]:
     """
     Optimises strategy parameters by testing all combinations within given
     ranges.
@@ -272,8 +274,10 @@ def main():
             This may take a while...
         """)
         start_time = time.time()
-        best_params, metrics = optimise_strategy_parameters(
-            data, strategy_type, strategy_params
+        best_params, metrics = optimise_strategy_params(
+            data,
+            strategy_type,
+            cast(dict[str, range] | dict[str, list[float]], strategy_params),
         )
         end_time = time.time()
         optimisation_duration = end_time - start_time
