@@ -87,7 +87,7 @@ def get_user_inputs_for_strategy_params(
     Returns:
         A dictionary containing the strategy parameters.
     """
-    optimise = st.sidebar.checkbox("Optimise Parameters")
+    optimise = st.sidebar.checkbox("Optimise Strategy Parameters")
     if optimise:
         if strategy_type == "Moving Average Crossover":
             params = {
