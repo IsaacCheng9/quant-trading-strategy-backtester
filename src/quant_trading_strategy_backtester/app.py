@@ -9,9 +9,11 @@ equity curve, and strategy returns using interactive Plotly charts.
 For instructions on how to run the application, refer to the README.md.
 """
 
-from typing import Any, cast
 import datetime
 import itertools
+import time
+from typing import Any, cast
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -267,10 +269,15 @@ def main():
             - Strategy: {strategy_type}\n
             This may take a while...
         """)
+        start_time = time.time()
         best_params, metrics = optimise_strategy_parameters(
             data, strategy_type, strategy_params
         )
-        st.success("Optimisation complete!")
+        end_time = time.time()
+        optimisation_duration = end_time - start_time
+        st.success(
+            f"Optimisation complete! Time taken: {optimisation_duration:.4f} seconds"
+        )
         st.subheader("Optimal Parameters:")
         st.write(best_params)
         results, _ = run_backtest(data, strategy_type, best_params)
