@@ -278,7 +278,7 @@ def main():
         st.success(
             f"Optimisation complete! Time taken: {optimisation_duration:.4f} seconds"
         )
-        st.subheader("Optimal Parameters:")
+        st.header("Optimal Parameters")
         st.write(best_params)
         results, _ = run_backtest(data, strategy_type, best_params)
     else:
@@ -289,7 +289,7 @@ def main():
     plot_equity_curve(results, ticker)
     plot_strategy_returns(results, ticker)
 
-    st.subheader("Raw Data")
+    st.header("Raw Data")
     st.write(data)
 
 
