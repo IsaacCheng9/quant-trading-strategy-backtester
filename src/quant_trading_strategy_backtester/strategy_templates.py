@@ -151,3 +151,58 @@ class MovingAverageCrossoverStrategy(Strategy):
         signals["positions"] = signals["signal"].diff()
 
         return signals
+
+
+# TODO: Improve documentation for this
+class PairsTradingStrategy(Strategy):
+    """
+    Generates buy and sell signals by trading two correlated instruments.
+    """
+
+    def __init__(self, params: dict[str, Any]):
+        self.window = int(params["window"])
+        self.entry_z_score = float(params["entry_z_score"])
+        self.exit_z_score = float(params["exit_z_score"])
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Generates trading signals for the given data.
+
+        Args:
+            data: A DataFrame containing the price data. Must have a 'Close_1'
+                  and a 'Close_2' column to represent the two tickers.
+
+        Returns:
+            A DataFrame containing the generated trading signals. Columns
+            include 'signal', 'mean', 'std', 'upper_band', 'lower_band', and
+            'positions'.
+        """
+        # Ensure we have data for both stocks
+        if "Close_1" not in data.columns or "Close_2" not in data.columns:
+            raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
+
+        signals = pd.DataFrame(index=data.index)
+
+        # Calculate the spread
+        signals["spread"] = data["Close_1"] - data["Close_2"]
+
+        # Calculate z-score of the spread
+        signals["z_score"] = (
+            signals["spread"] - signals["spread"].rolling(window=self.window).mean()
+        ) / signals["spread"].rolling(window=self.window).std()
+
+        # Generate trading signals
+        signals["signal"] = 0.0
+        signals.loc[
+            signals["z_score"] > self.entry_z_score, "signal"
+        ] = -1  # Short stock1, long stock2
+        signals.loc[signals["z_score"] < -self.entry_z_score, "signal"] = (
+            1  # Long stock1, short stock2
+        )
+        signals.loc[signals["z_score"].abs() < self.exit_z_score, "signal"] = (
+            0  # Close positions
+        )
+
+        signals["positions"] = signals["signal"].diff()
+
+        return signals
