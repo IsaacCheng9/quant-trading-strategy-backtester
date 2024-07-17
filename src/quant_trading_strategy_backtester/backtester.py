@@ -63,7 +63,18 @@ class Backtester:
         """
         portfolio = pd.DataFrame(index=signals.index)
         portfolio["positions"] = signals["positions"]
-        portfolio["asset_returns"] = self.data["Close"].pct_change()
+
+        # Pairs trading
+        if "Close_1" in self.data.columns and "Close_2" in self.data.columns:
+            portfolio["asset_returns"] = (
+                self.data["Close_1"].pct_change() - self.data["Close_2"].pct_change()
+            )
+        # Single asset trading
+        elif "Close" in self.data.columns:
+            portfolio["asset_returns"] = self.data["Close"].pct_change()
+        else:
+            raise ValueError("Data does not contain required 'Close' columns")
+
         portfolio["strategy_returns"] = (
             portfolio["positions"].shift(1) * portfolio["asset_returns"]
         )
