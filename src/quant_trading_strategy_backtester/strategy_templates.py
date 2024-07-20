@@ -163,10 +163,10 @@ class PairsTradingStrategy(Strategy):
     """
     Implements a pairs trading strategy for two correlated financial
     instruments, which is based on the assumption that the historical
-    relationship between two assets will continue. This strategy exploits
-    temporary mispricings in this relationship. It calculates a spread between
-    the two assets and uses z-scores to determine when to enter and exit
-    positions.
+    relationship between two assets will continue. This is a market-neutral
+    strategy that exploits temporary mispricings in this relationship. It
+    calculates a spread between the two assets and uses z-scores to determine
+    when to enter and exit positions.
 
     Attributes:
         params: A dictionary containing the strategy parameters.
