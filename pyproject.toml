@@ -12,8 +12,6 @@ pandas = "^2.2.2"
 numpy = "^2.0.0"
 yfinance = "^0.2.40"
 plotly = "^5.22.0"
-bs4 = "^0.0.2"
-requests = "^2.32.3"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.5.1"
