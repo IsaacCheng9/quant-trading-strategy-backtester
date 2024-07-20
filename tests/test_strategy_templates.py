@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -5,17 +7,20 @@ from quant_trading_strategy_backtester.strategy_templates import (
     MeanReversionStrategy,
     MovingAverageCrossoverStrategy,
     PairsTradingStrategy,
+    Strategy,
 )
 
 
-def test_moving_average_crossover_strategy_initialization():
+def test_moving_average_crossover_strategy_initialization() -> None:
     params = {"short_window": 5, "long_window": 20}
     strategy = MovingAverageCrossoverStrategy(params)
     assert strategy.short_window == 5
     assert strategy.long_window == 20
 
 
-def test_moving_average_crossover_strategy_generate_signals(mock_data):
+def test_moving_average_crossover_strategy_generate_signals(
+    mock_data: pd.DataFrame,
+) -> None:
     params = {"short_window": 5, "long_window": 20}
     strategy = MovingAverageCrossoverStrategy(params)
     signals = strategy.generate_signals(mock_data)
@@ -26,14 +31,14 @@ def test_moving_average_crossover_strategy_generate_signals(mock_data):
     assert signals["signal"].isin([0.0, 1.0]).all()
 
 
-def test_mean_reversion_strategy_initialization():
+def test_mean_reversion_strategy_initialization() -> None:
     params = {"window": 20, "std_dev": 2.0}
     strategy = MeanReversionStrategy(params)
     assert strategy.window == 20
     assert strategy.std_dev == 2.0
 
 
-def test_mean_reversion_strategy_generate_signals(mock_data):
+def test_mean_reversion_strategy_generate_signals(mock_data: pd.DataFrame) -> None:
     params = {"window": 5, "std_dev": 2.0}
     strategy = MeanReversionStrategy(params)
     signals = strategy.generate_signals(mock_data)
@@ -55,18 +60,20 @@ def test_mean_reversion_strategy_generate_signals(mock_data):
         ),
     ],
 )
-def test_strategy_with_empty_data(strategy_class, params):
+def test_strategy_with_empty_data(
+    strategy_class: Strategy, params: dict[str, Any]
+) -> None:
     empty_data = pd.DataFrame(
         columns=["Close"]
         if strategy_class != PairsTradingStrategy
         else ["Close_1", "Close_2"]
     )
-    strategy = strategy_class(params)
+    strategy = strategy_class(params)  # type: ignore
     signals = strategy.generate_signals(empty_data)
     assert signals.empty
 
 
-def test_pairs_trading_strategy_initialization():
+def test_pairs_trading_strategy_initialization() -> None:
     params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
     strategy = PairsTradingStrategy(params)
     assert strategy.window == 20
@@ -74,7 +81,7 @@ def test_pairs_trading_strategy_initialization():
     assert strategy.exit_z_score == 0.5
 
 
-def test_pairs_trading_strategy_generate_signals():
+def test_pairs_trading_strategy_generate_signals() -> None:
     # Create mock data for two assets
     dates = pd.date_range(start="2020-01-01", periods=100)
     data = pd.DataFrame(
@@ -96,7 +103,7 @@ def test_pairs_trading_strategy_generate_signals():
     assert signals["signal"].isin([0.0, 1.0, -1.0]).all()
 
 
-def test_pairs_trading_strategy_signal_generation():
+def test_pairs_trading_strategy_signal_generation() -> None:
     dates = pd.date_range(start="2020-01-01", periods=100)
     data = pd.DataFrame(
         {"Close_1": [100] * 50 + [110] * 50, "Close_2": [100] * 50 + [100] * 50},
@@ -114,7 +121,7 @@ def test_pairs_trading_strategy_signal_generation():
     assert (signals["signal"].iloc[51:] != 0.0).any()  #
 
 
-def test_pairs_trading_strategy_with_missing_data():
+def test_pairs_trading_strategy_with_missing_data() -> None:
     data = pd.DataFrame(
         {"Close_1": [100, 101, 102, 103], "Close_2": [100, 101, np.nan, 102]}
     )
@@ -130,7 +137,7 @@ def test_pairs_trading_strategy_with_missing_data():
     assert not np.isnan(signals["signal"].iloc[3])
 
 
-def test_pairs_trading_strategy_with_invalid_data():
+def test_pairs_trading_strategy_with_invalid_data() -> None:
     data = pd.DataFrame(
         {
             "Close_1": [100, 101, 102],
