@@ -105,17 +105,68 @@ def test_backtester_get_performance_metrics(
         assert metric in metrics
 
 
-def test_backtester_with_invalid_data() -> None:
-    invalid_data = pd.DataFrame({"Invalid": [1, 2, 3]})
-    strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
+@pytest.mark.parametrize(
+    "strategy_class,params",
+    [
+        (MovingAverageCrossoverStrategy, {"short_window": 5, "long_window": 20}),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}),
+        (
+            PairsTradingStrategy,
+            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+        ),
+    ],
+)
+def test_backtester_with_invalid_data(strategy_class, params) -> None:
+    if strategy_class == PairsTradingStrategy:
+        invalid_data = pd.DataFrame({"Invalid_1": [1, 2, 3], "Invalid_2": [4, 5, 6]})
+    else:
+        invalid_data = pd.DataFrame({"Invalid": [1, 2, 3]})
+
+    strategy = strategy_class(params)
     backtester = Backtester(invalid_data, strategy)
-    with pytest.raises(KeyError):
+
+    with pytest.raises((KeyError, ValueError)):
         backtester.run()
 
 
-def test_backtester_with_insufficient_data() -> None:
-    insufficient_data = pd.DataFrame({"Close": [100, 101]})
-    strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
+@pytest.mark.parametrize(
+    "strategy_class,params",
+    [
+        (MovingAverageCrossoverStrategy, {"short_window": 5, "long_window": 20}),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}),
+        (
+            PairsTradingStrategy,
+            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+        ),
+    ],
+)
+def test_backtester_with_insufficient_data_all_strategies(
+    strategy_class: Strategy, params: dict[str, Any]
+) -> None:
+    if strategy_class == PairsTradingStrategy:
+        insufficient_data = pd.DataFrame(
+            {"Close_1": [100, 101], "Close_2": [100, 102]},
+            index=pd.date_range(start="2020-01-01", periods=2),
+        )
+    else:
+        insufficient_data = pd.DataFrame(
+            {"Close": [100, 101]}, index=pd.date_range(start="2020-01-01", periods=2)
+        )
+
+    strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(insufficient_data, strategy)
     results = backtester.run()
-    assert results.empty
+
+    # Check that no meaningful trading occurred
+    assert (
+        abs(results["positions"].sum()) < 1e-6
+    )  # Allow for small floating-point errors
+
+    # Check that the equity curve doesn't change significantly
+    assert abs(results["equity_curve"].iloc[-1] - backtester.initial_capital) < 1e-6
+
+    # Check that cumulative returns are close to 1 (no significant change)
+    assert abs(results["cumulative_returns"].iloc[-1] - 1) < 1e-6
+
+    # Verify that the DataFrame has the expected number of rows
+    assert len(results) == len(insufficient_data)
