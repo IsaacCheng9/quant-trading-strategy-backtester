@@ -22,6 +22,7 @@ from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.strategy_templates import (
     MeanReversionStrategy,
     MovingAverageCrossoverStrategy,
+    PairsTradingStrategy,
 )
 
 
@@ -44,8 +45,30 @@ def load_yfinance_data(
     return data
 
 
+@st.cache_data
+def load_yfinance_data_two_tickers(
+    ticker1: str, ticker2: str, start_date: datetime.date, end_date: datetime.date
+) -> pd.DataFrame:
+    """
+    Fetches historical stock data for two tickers from Yahoo Finance.
+
+    Args:
+        ticker1: The first stock ticker symbol.
+        ticker2: The second stock ticker symbol.
+        start_date: The start date for the data.
+        end_date: The end date for the data.
+
+    Returns:
+        A DataFrame containing the historical stock data for both tickers.
+    """
+    data1 = yf.download(ticker1, start=start_date, end=end_date)
+    data2 = yf.download(ticker2, start=start_date, end=end_date)
+    combined_data = pd.DataFrame({"Close_1": data1["Close"], "Close_2": data2["Close"]})
+    return combined_data
+
+
 def get_user_inputs_except_strategy_params() -> (
-    tuple[str, datetime.date, datetime.date, str]
+    tuple[str | tuple[str, str], datetime.date, datetime.date, str]
 ):
     """
     Gets user inputs besides strategy parameters from the Streamlit sidebar.
@@ -53,9 +76,25 @@ def get_user_inputs_except_strategy_params() -> (
     Returns:
         A tuple containing the ticker symbol, start date, end date, and
         strategy type. The strategy type is used to determine the additional
-        input fields that are required.
+        input fields that are required. For pairs trading, it returns a tuple
+        of two ticker symbosl instead of one.
     """
-    ticker: str = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
+    strategy_type = cast(
+        str,
+        st.sidebar.selectbox(
+            "Strategy Type",
+            ["Mean Reversion", "Moving Average Crossover", "Pairs Trading"],
+            index=0,
+        ),
+    )
+    # We need two tickers if we're using the Pairs Trading strategy.
+    if strategy_type == "Pairs Trading":
+        ticker1: str = st.sidebar.text_input("Ticker Symbol 1", value="AAPL").upper()
+        ticker2: str = st.sidebar.text_input("Ticker Symbol 1", value="GOOGL").upper()
+        ticker = (ticker1, ticker2)
+    else:
+        ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
+
     start_date: datetime.date = cast(
         datetime.date,
         st.sidebar.date_input("Start Date", value=pd.to_datetime("2020-01-01")),
@@ -64,13 +103,7 @@ def get_user_inputs_except_strategy_params() -> (
         datetime.date,
         st.sidebar.date_input("End Date", value=pd.to_datetime("2023-12-31")),
     )
-    # Set the default strategy type to 'Mean Reversion'.
-    strategy_type = cast(
-        str,
-        st.sidebar.selectbox(
-            "Strategy Type", ["Mean Reversion", "Moving Average Crossover"], index=0
-        ),
-    )
+
     return ticker, start_date, end_date, strategy_type
 
 
@@ -99,6 +132,12 @@ def get_user_inputs_for_strategy_params(
                 "window": range(5, 101, 5),
                 "std_dev": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
             }
+        elif strategy_type == "Pairs Trading":
+            params = {
+                "window": range(10, 101, 10),
+                "entry_z_score": [1.0, 1.5, 2.0, 2.5, 3.0],
+                "exit_z_score": [0.1, 0.5, 1.0, 1.5],
+            }
     else:
         if strategy_type == "Moving Average Crossover":
             short_window = st.sidebar.slider(
@@ -116,6 +155,21 @@ def get_user_inputs_for_strategy_params(
                 "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
             )
             params = {"window": window, "std_dev": std_dev}
+        elif strategy_type == "Pairs Trading":
+            window = st.sidebar.slider(
+                "Window (Days)", min_value=10, max_value=100, value=50
+            )
+            entry_z_score = st.sidebar.slider(
+                "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
+            )
+            exit_z_score = st.sidebar.slider(
+                "Exit Z-Score", min_value=0.1, max_value=1.5, value=0.5, step=0.1
+            )
+            params = {
+                "window": window,
+                "entry_z_score": entry_z_score,
+                "exit_z_score": exit_z_score,
+            }
 
     return optimise, params
 
@@ -138,6 +192,8 @@ def run_backtest(
         strategy = MovingAverageCrossoverStrategy(strategy_params)
     elif strategy_type == "Mean Reversion":
         strategy = MeanReversionStrategy(strategy_params)
+    elif strategy_type == "Pairs Trading":
+        strategy = PairsTradingStrategy(strategy_params)
     else:
         raise ValueError("Invalid strategy type")
 
@@ -164,7 +220,7 @@ def display_performance_metrics(metrics: dict[str, float]) -> None:
     max_drawdown_col.metric("Max Drawdown", f"{metrics['Max Drawdown']:.2%}")
 
 
-def plot_equity_curve(results: pd.DataFrame, ticker: str) -> None:
+def plot_equity_curve(results: pd.DataFrame, ticker_display: str) -> None:
     """
     Plots the equity curve of the backtest.
 
@@ -177,14 +233,14 @@ def plot_equity_curve(results: pd.DataFrame, ticker: str) -> None:
         data=go.Scatter(x=results.index, y=results["equity_curve"], mode="lines")
     )
     fig.update_layout(
-        title=f"{ticker} Equity Curve",
+        title=f"{ticker_display} Equity Curve",
         xaxis_title="Date",
         yaxis_title="Portfolio Value",
     )
     st.plotly_chart(fig)
 
 
-def plot_strategy_returns(results: pd.DataFrame, ticker: str) -> None:
+def plot_strategy_returns(results: pd.DataFrame, ticker_display: str) -> None:
     """
     Plots the strategy returns over time.
 
@@ -197,7 +253,9 @@ def plot_strategy_returns(results: pd.DataFrame, ticker: str) -> None:
         data=go.Scatter(x=results.index, y=results["strategy_returns"], mode="lines")
     )
     fig.update_layout(
-        title=f"{ticker} Strategy Returns", xaxis_title="Date", yaxis_title="Returns"
+        title=f"{ticker_display} Strategy Returns",
+        xaxis_title="Date",
+        yaxis_title="Returns",
     )
     st.plotly_chart(fig)
 
@@ -258,7 +316,13 @@ def main():
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
 
     # Load the historical data from Yahoo Finance.
-    data = load_yfinance_data(ticker, start_date, end_date)
+    if strategy_type == "Pairs Trading":
+        ticker1, ticker2 = ticker
+        data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+        ticker_display = f"{ticker1} vs. {ticker2}"
+    else:
+        data = load_yfinance_data(ticker, start_date, end_date)
+        ticker_display = ticker
     if data is None or data.empty:
         st.write("No data available for the selected ticker and date range.")
         return
@@ -267,7 +331,7 @@ def main():
     if optimise:
         st.info(f"""
             Optimising parameters for the following configuration:
-            - Ticker: {ticker}
+            - Ticker(s): {ticker_display}
             - Start Date: {start_date}
             - End Date: {end_date}
             - Strategy: {strategy_type}\n
@@ -292,8 +356,8 @@ def main():
 
     # Display results and metrics from the backtest.
     display_performance_metrics(metrics)
-    plot_equity_curve(results, ticker)
-    plot_strategy_returns(results, ticker)
+    plot_equity_curve(results, ticker_display)
+    plot_strategy_returns(results, ticker_display)
 
     st.header("Raw Data")
     st.write(data)

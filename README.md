@@ -15,6 +15,7 @@ _Try the deployed app
 
 - Mean Reversion
 - Moving Average Crossover
+- Pairs Trading
 
 ## Usage
 
