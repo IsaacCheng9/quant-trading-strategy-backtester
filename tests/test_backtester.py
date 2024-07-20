@@ -158,15 +158,11 @@ def test_backtester_with_insufficient_data_all_strategies(
     results = backtester.run()
 
     # Check that no meaningful trading occurred
-    assert (
-        abs(results["positions"].sum()) < 1e-6
-    )  # Allow for small floating-point errors
-
+    # Allow for small floating-point errors
+    assert abs(results["positions"].sum()) < 1e-6
     # Check that the equity curve doesn't change significantly
     assert abs(results["equity_curve"].iloc[-1] - backtester.initial_capital) < 1e-6
-
     # Check that cumulative returns are close to 1 (no significant change)
     assert abs(results["cumulative_returns"].iloc[-1] - 1) < 1e-6
-
     # Verify that the DataFrame has the expected number of rows
     assert len(results) == len(insufficient_data)
