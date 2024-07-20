@@ -232,6 +232,9 @@ class PairsTradingStrategy(Strategy):
         # Close positions
         signals.loc[signals["z_score"].abs() < self.exit_z_score, "signal"] = 0
 
+        # Handle missing data
+        signals.loc[data["Close_1"].isna() | data["Close_2"].isna(), "signal"] = np.nan
+
         signals["positions"] = signals["signal"].diff()
 
         return signals
