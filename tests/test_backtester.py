@@ -1,3 +1,4 @@
+from typing import Any
 import pandas as pd
 import pytest
 from quant_trading_strategy_backtester.backtester import Backtester
@@ -5,6 +6,7 @@ from quant_trading_strategy_backtester.strategy_templates import (
     MeanReversionStrategy,
     MovingAverageCrossoverStrategy,
     PairsTradingStrategy,
+    Strategy,
 )
 
 
@@ -24,12 +26,17 @@ from quant_trading_strategy_backtester.strategy_templates import (
         ),
     ],
 )
-def test_backtester_initialization(request, strategy_class, params, data_fixture):
+def test_backtester_initialization(
+    request: pytest.FixtureRequest,
+    strategy_class: Strategy,
+    params: dict[str, Any],
+    data_fixture: str,
+) -> None:
     data = request.getfixturevalue(data_fixture)
-    strategy = strategy_class(params)
+    strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(data, strategy)
     assert backtester.data is data
-    assert isinstance(backtester.strategy, strategy_class)
+    assert isinstance(backtester.strategy, strategy_class)  # type: ignore
     assert backtester.initial_capital == 100000.0
 
 
@@ -49,9 +56,14 @@ def test_backtester_initialization(request, strategy_class, params, data_fixture
         ),
     ],
 )
-def test_backtester_run(request, strategy_class, params, data_fixture):
+def test_backtester_run(
+    request: pytest.FixtureRequest,
+    strategy_class: Strategy,
+    params: dict[str, Any],
+    data_fixture: str,
+) -> None:
     data = request.getfixturevalue(data_fixture)
-    strategy = strategy_class(params)
+    strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(data, strategy)
     results = backtester.run()
     assert isinstance(results, pd.DataFrame)
@@ -77,10 +89,13 @@ def test_backtester_run(request, strategy_class, params, data_fixture):
     ],
 )
 def test_backtester_get_performance_metrics(
-    request, strategy_class, params, data_fixture
-):
+    request: pytest.FixtureRequest,
+    strategy_class: Strategy,
+    params: dict[str, Any],
+    data_fixture: str,
+) -> None:
     data = request.getfixturevalue(data_fixture)
-    strategy = strategy_class(params)
+    strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(data, strategy)
     backtester.run()
     metrics = backtester.get_performance_metrics()
@@ -90,7 +105,7 @@ def test_backtester_get_performance_metrics(
         assert metric in metrics
 
 
-def test_backtester_with_invalid_data():
+def test_backtester_with_invalid_data() -> None:
     invalid_data = pd.DataFrame({"Invalid": [1, 2, 3]})
     strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
     backtester = Backtester(invalid_data, strategy)
@@ -98,7 +113,7 @@ def test_backtester_with_invalid_data():
         backtester.run()
 
 
-def test_backtester_with_insufficient_data():
+def test_backtester_with_insufficient_data() -> None:
     insufficient_data = pd.DataFrame({"Close": [100, 101]})
     strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
     backtester = Backtester(insufficient_data, strategy)
