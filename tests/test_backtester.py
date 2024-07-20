@@ -116,13 +116,15 @@ def test_backtester_get_performance_metrics(
         ),
     ],
 )
-def test_backtester_with_invalid_data(strategy_class, params) -> None:
+def test_backtester_with_invalid_data(
+    strategy_class: Strategy, params: dict[str, Any]
+) -> None:
     if strategy_class == PairsTradingStrategy:
         invalid_data = pd.DataFrame({"Invalid_1": [1, 2, 3], "Invalid_2": [4, 5, 6]})
     else:
         invalid_data = pd.DataFrame({"Invalid": [1, 2, 3]})
 
-    strategy = strategy_class(params)
+    strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(invalid_data, strategy)
 
     with pytest.raises((KeyError, ValueError)):
