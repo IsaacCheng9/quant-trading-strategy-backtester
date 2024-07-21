@@ -1,3 +1,6 @@
+"""
+Contains tests for trading strategy templates.
+"""
 from typing import Any
 
 import numpy as np
