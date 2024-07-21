@@ -1,3 +1,6 @@
+"""
+Contains tests for data fetching functions.
+"""
 import datetime
 
 import pandas as pd
