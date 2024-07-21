@@ -1,3 +1,7 @@
+"""
+Contains pytest fixtures for tests, such as mock data.
+"""
+
 import pytest
 import pandas as pd
 
