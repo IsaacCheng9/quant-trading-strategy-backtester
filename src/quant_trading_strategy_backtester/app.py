@@ -30,6 +30,147 @@ from quant_trading_strategy_backtester.strategy_templates import (
 logger = logging.getLogger(__name__)
 NUM_TOP_COMPANIES = 20
 
+# Trading strategy preparation functions
+
+
+def prepare_pairs_trading_strategy_with_optimisation(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    strategy_params: dict[str, Any],
+    optimise: bool,
+) -> tuple[pd.DataFrame, str, dict[str, int | float]]:
+    """
+    Handles the optimisation process for pairs trading strategy.
+
+    Selects the best pair of tickers from the top S&P 500 companies and
+    optimises the strategy parameters if requested.
+
+    Args:
+        start_date: The start date for historical data.
+        end_date: The end date for historical data.
+        strategy_params: Initial strategy parameters.
+        optimise: Whether to optimise strategy parameters.
+
+    Returns:
+        A tuple containing:
+            - Historical data for the selected pair.
+            - A string representation of the selected pair.
+            - Optimised strategy parameters.
+    """
+    # Inform the user that the optimisation process is starting
+    st.info(
+        f"Selecting the best pair from the top {NUM_TOP_COMPANIES} S&P 500 companies. This may take a while..."
+    )
+
+    start_time = time.time()
+
+    # Fetch the top S&P 500 companies
+    with st.spinner("Fetching top S&P 500 companies..."):
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
+
+    # Optimise ticker pair selection and strategy parameters
+    ticker, strategy_params, _ = optimise_pairs_trading_tickers(
+        top_companies, start_date, end_date, strategy_params, optimise
+    )
+    ticker1, ticker2 = ticker
+
+    # Calculate and display the time taken for optimisation
+    end_time = time.time()
+    duration = end_time - start_time
+    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
+
+    # Display the optimal tickers and parameters
+    st.header("Optimal Tickers and Parameters")
+    tickers_and_strategy_params = {
+        "ticker1": ticker1,
+        "ticker2": ticker2,
+    } | strategy_params
+    st.write(tickers_and_strategy_params)
+
+    # Load historical data for the selected pair
+    data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+    ticker_display = f"{ticker1} vs. {ticker2}"
+
+    return data, ticker_display, strategy_params
+
+
+def prepare_pairs_trading_strategy_without_optimisation(
+    ticker: tuple[str, str],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    strategy_params: dict[str, Any],
+    optimise: bool,
+) -> tuple[pd.DataFrame, str, dict[str, Any]]:
+    """
+    Handles the pairs trading strategy for user-selected tickers.
+
+    Loads historical data for the user-selected pair of tickers and optimises
+    the strategy parameters if requested.
+
+    Args:
+        ticker: A tuple containing two ticker symbols.
+        start_date: The start date for historical data.
+        end_date: The end date for historical data.
+        strategy_params: Initial strategy parameters.
+        optimise: Whether to optimise strategy parameters.
+
+    Returns:
+        A tuple containing:
+            - Historical data for the selected pair.
+            - A string representation of the selected pair.
+            - Optimised strategy parameters if optimise is True,
+              otherwise the initial strategy parameters.
+    """
+    ticker1, ticker2 = ticker
+    data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+    ticker_display = f"{ticker1} vs. {ticker2}"
+
+    if optimise:
+        strategy_params, _ = run_optimisation(data, "Pairs Trading", strategy_params)
+
+    return data, ticker_display, strategy_params
+
+
+def prepare_single_ticker_strategy(
+    ticker: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    optimise: bool,
+) -> tuple[pd.DataFrame, str, dict[str, Any]]:
+    """
+    Handles strategies for a single ticker.
+
+    Loads historical data for a single ticker and optimises the strategy
+    parameters if requested.
+
+    Args:
+        ticker: The ticker symbol.
+        start_date: The start date for historical data.
+        end_date: The end date for historical data.
+        strategy_type: The type of strategy being used.
+        strategy_params: Initial strategy parameters.
+        optimise: Whether to optimise strategy parameters.
+
+    Returns:
+        A tuple containing:
+            - Historical data for the selected ticker.
+            - The ticker symbol.
+            - Optimised strategy parameters if optimise is True,
+              otherwise the initial strategy parameters.
+    """
+    data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+    ticker_display = ticker
+
+    if optimise:
+        strategy_params, _ = run_optimisation(data, strategy_type, strategy_params)
+
+    return data, ticker_display, strategy_params
+
+
+# Data loading functions
+
 
 @st.cache_data
 def load_yfinance_data_one_ticker(
@@ -130,6 +271,9 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     return top_companies
 
 
+# User input functions
+
+
 def get_user_inputs_except_strategy_params() -> (
     tuple[str | tuple[str, str] | None, datetime.date, datetime.date, str, bool]
 ):
@@ -180,6 +324,130 @@ def get_user_inputs_except_strategy_params() -> (
     return ticker, start_date, end_date, strategy_type, auto_select_tickers
 
 
+def get_user_inputs_for_strategy_params(
+    strategy_type: str,
+) -> tuple[bool, dict[str, float] | dict[str, range] | dict[str, list[float]]]:
+    """
+    Gets user inputs for the strategy parameters from the Streamlit sidebar
+    based on the selected strategy.
+
+    Args:
+        strategy_type: The type of strategy selected by the user.
+
+    Returns:
+        A tuple containing a boolean indicating whether to optimise, and a dictionary of strategy parameters.
+    """
+    optimise = st.sidebar.checkbox("Optimise Strategy Parameters")
+
+    if optimise:
+        params = get_optimisation_ranges(strategy_type)
+    else:
+        params = get_fixed_params(strategy_type)
+
+    return optimise, params
+
+
+def get_optimisation_ranges(strategy_type: str) -> dict[str, Any]:
+    if strategy_type == "Moving Average Crossover":
+        return {
+            "short_window": range(5, 51, 5),
+            "long_window": range(20, 201, 20),
+        }
+    elif strategy_type == "Mean Reversion":
+        return {
+            "window": range(5, 101, 5),
+            "std_dev": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+        }
+    elif strategy_type == "Pairs Trading":
+        return {
+            "window": range(10, 101, 10),
+            "entry_z_score": [1.0, 1.5, 2.0, 2.5, 3.0],
+            "exit_z_score": [0.1, 0.5, 1.0, 1.5],
+        }
+    else:
+        raise ValueError("Invalid strategy type")
+
+
+def get_fixed_params(strategy_type: str) -> dict[str, Any]:
+    if strategy_type == "Moving Average Crossover":
+        short_window = st.sidebar.slider(
+            "Short Window (Days)", min_value=5, max_value=50, value=20
+        )
+        long_window = st.sidebar.slider(
+            "Long Window (Days)", min_value=20, max_value=200, value=50
+        )
+        return {"short_window": short_window, "long_window": long_window}
+    elif strategy_type == "Mean Reversion":
+        window = st.sidebar.slider(
+            "Window (Days)", min_value=5, max_value=100, value=20
+        )
+        std_dev = st.sidebar.slider(
+            "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
+        )
+        return {"window": window, "std_dev": std_dev}
+    elif strategy_type == "Pairs Trading":
+        window = st.sidebar.slider(
+            "Window (Days)", min_value=10, max_value=100, value=50
+        )
+        entry_z_score = st.sidebar.slider(
+            "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
+        )
+        exit_z_score = st.sidebar.slider(
+            "Exit Z-Score", min_value=0.1, max_value=1.5, value=0.5, step=0.1
+        )
+        return {
+            "window": window,
+            "entry_z_score": entry_z_score,
+            "exit_z_score": exit_z_score,
+        }
+    else:
+        raise ValueError("Invalid strategy type")
+
+
+# Optimisation functions
+
+
+def run_optimisation(
+    data: pd.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, float]]:
+    """
+    Runs the optimisation process for strategy parameters.
+
+    Optimises the strategy parameters based on the historical data and strategy
+    type.
+
+    Args:
+        data: Historical price data.
+        strategy_type: The type of strategy being optimised.
+        strategy_params: Initial strategy parameters or parameter ranges.
+
+    Returns:
+        A tuple containing:
+            - Optimised strategy parameters.
+            - Performance metrics for the optimised strategy.
+    """
+    st.info("Optimising parameters. This may take a while...")
+    start_time = time.time()
+
+    # Run the optimisation process
+    strategy_params, metrics = optimise_strategy_params(
+        data,
+        strategy_type,
+        cast(dict[str, range] | dict[str, list[float]], strategy_params),
+    )
+
+    # Calculate and display the time taken for optimisation
+    end_time = time.time()
+    duration = end_time - start_time
+    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
+
+    # Display the optimal parameters
+    st.header("Optimal Parameters")
+    st.write(strategy_params)
+
+    return strategy_params, metrics
+
+
 def optimise_pairs_trading_tickers(
     top_companies: list[tuple[str, float]],
     start_date: datetime.date,
@@ -188,7 +456,7 @@ def optimise_pairs_trading_tickers(
     optimise: bool,
 ) -> tuple[tuple[str, str], dict[str, Any], dict[str, float]]:
     """
-    Optimizes ticker pair selection and strategy parameters for pairs trading.
+    Optimises ticker pair selection and strategy parameters for pairs trading.
 
     Args:
         top_companies: List of tuples containing ticker symbols and market caps
@@ -207,19 +475,32 @@ def optimise_pairs_trading_tickers(
     best_metrics = None
     best_sharpe_ratio = float("-inf")
 
-    # Generate all possible pairs of tickers
     ticker_pairs = list(
         itertools.combinations([company[0] for company in top_companies], 2)
     )
+    total_combinations = len(ticker_pairs)
+    # Display progress bar and status text, as this process may take a while.
+    progress_bar = st.progress(0)
+    status_text = st.empty()
 
-    for ticker1, ticker2 in ticker_pairs:
+    for i, (ticker1, ticker2) in enumerate(ticker_pairs):
+        status_text.text(
+            f"Evaluating pair {i + 1} / {total_combinations}: {ticker1} vs. {ticker2}"
+        )
+        progress_bar.progress((i + 1) / total_combinations)
+
         data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
         if data is None or data.empty:
             continue
 
         if optimise:
+            # Convert single values to lists for optimisation
+            param_ranges = {
+                k: [v] if isinstance(v, (int, float)) else v
+                for k, v in strategy_params.items()
+            }
             current_params, current_metrics = optimise_strategy_params(
-                data, "Pairs Trading", strategy_params
+                data, "Pairs Trading", param_ranges
             )
         else:
             _, current_metrics = run_backtest(data, "Pairs Trading", strategy_params)
@@ -231,77 +512,71 @@ def optimise_pairs_trading_tickers(
             best_params = current_params
             best_metrics = current_metrics
 
-    if best_pair is None:
-        raise ValueError("No valid ticker pair found")
+    progress_bar.empty()
+    status_text.empty()
+    if not best_pair or not best_params or not best_metrics:
+        raise ValueError("Pairs trading optimisation failed")
 
     return best_pair, best_params, best_metrics
 
 
-def get_user_inputs_for_strategy_params(
+def optimise_strategy_params(
+    data: pd.DataFrame,
     strategy_type: str,
-) -> tuple[bool, dict[str, float] | dict[str, range] | dict[str, list[float]]]:
+    parameter_ranges: dict[str, range] | dict[str, list[float]],
+) -> tuple[dict[str, int] | dict[str, float], dict[str, float]]:
     """
-    Gets user inputs for the strategy parameters from the Streamlit sidebar
-    based on the selected strategy.
+    Optimises strategy parameters by testing all combinations within given
+    ranges.
 
     Args:
-        strategy_type: The type of strategy selected by the user.
+        data: Historical price data.
+        strategy_type: The type of strategy to optimise.
+        parameter_ranges: A dictionary of parameters and their possible values
+                          to test.
 
     Returns:
-        A dictionary containing the strategy parameters.
+        A tuple containing the best parameters and their performance metrics.
     """
-    optimise = st.sidebar.checkbox("Optimise Strategy Parameters")
-    if optimise:
-        if strategy_type == "Moving Average Crossover":
-            params = {
-                "short_window": range(5, 51, 5),
-                "long_window": range(20, 201, 20),
-            }
-        elif strategy_type == "Mean Reversion":
-            params = {
-                "window": range(5, 101, 5),
-                "std_dev": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
-            }
-        elif strategy_type == "Pairs Trading":
-            params = {
-                "window": range(10, 101, 10),
-                "entry_z_score": [1.0, 1.5, 2.0, 2.5, 3.0],
-                "exit_z_score": [0.1, 0.5, 1.0, 1.5],
-            }
-    else:
-        if strategy_type == "Moving Average Crossover":
-            short_window = st.sidebar.slider(
-                "Short Window (Days)", min_value=5, max_value=50, value=20
-            )
-            long_window = st.sidebar.slider(
-                "Long Window (Days)", min_value=20, max_value=200, value=50
-            )
-            params = {"short_window": short_window, "long_window": long_window}
-        elif strategy_type == "Mean Reversion":
-            window = st.sidebar.slider(
-                "Window (Days)", min_value=5, max_value=100, value=20
-            )
-            std_dev = st.sidebar.slider(
-                "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
-            )
-            params = {"window": window, "std_dev": std_dev}
-        elif strategy_type == "Pairs Trading":
-            window = st.sidebar.slider(
-                "Window (Days)", min_value=10, max_value=100, value=50
-            )
-            entry_z_score = st.sidebar.slider(
-                "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
-            )
-            exit_z_score = st.sidebar.slider(
-                "Exit Z-Score", min_value=0.1, max_value=1.5, value=0.5, step=0.1
-            )
-            params = {
-                "window": window,
-                "entry_z_score": entry_z_score,
-                "exit_z_score": exit_z_score,
-            }
+    best_params = None
+    best_metrics = None
+    best_sharpe_ratio = float("-inf")
 
-    return optimise, params
+    param_names = list(parameter_ranges.keys())
+    param_values = [
+        list(value) if isinstance(value, range) else value
+        for value in parameter_ranges.values()
+    ]
+
+    param_combinations = list(itertools.product(*param_values))
+    total_combinations = len(param_combinations)
+    # Display progress bar and status text, as this process may take a while.
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for i, params in enumerate(param_combinations):
+        status_text.text(
+            f"Evaluating parameter combination {i + 1} / {total_combinations}"
+        )
+        progress_bar.progress((i + 1) / total_combinations)
+
+        current_params = dict(zip(param_names, params))
+        _, metrics = run_backtest(data, strategy_type, current_params)
+
+        if metrics["Sharpe Ratio"] > best_sharpe_ratio:
+            best_sharpe_ratio = metrics["Sharpe Ratio"]
+            best_params = current_params
+            best_metrics = metrics
+
+    progress_bar.empty()
+    status_text.empty()
+    if not best_params or not best_metrics:
+        raise ValueError("Parameter optimisation failed")
+
+    return best_params, best_metrics
+
+
+# Backtesting and visualization functions
 
 
 def run_backtest(
@@ -318,22 +593,26 @@ def run_backtest(
     Returns:
         A tuple containing the backtest results DataFrame and performance metrics.
     """
-    if strategy_type == "Moving Average Crossover":
-        strategy = MovingAverageCrossoverStrategy(strategy_params)
-    elif strategy_type == "Mean Reversion":
-        strategy = MeanReversionStrategy(strategy_params)
-    elif strategy_type == "Pairs Trading":
-        strategy = PairsTradingStrategy(strategy_params)
-    else:
-        raise ValueError("Invalid strategy type")
-
+    strategy = create_strategy(strategy_type, strategy_params)
     backtester = Backtester(data, strategy)
     results = backtester.run()
     metrics = backtester.get_performance_metrics()
     assert (
         metrics is not None
-    ), "No results available for the selected ticker and date range."
+    ), "No results available for the selected ticker and date range"
+
     return results, metrics
+
+
+def create_strategy(strategy_type: str, strategy_params: dict[str, Any]):
+    if strategy_type == "Moving Average Crossover":
+        return MovingAverageCrossoverStrategy(strategy_params)
+    elif strategy_type == "Mean Reversion":
+        return MeanReversionStrategy(strategy_params)
+    elif strategy_type == "Pairs Trading":
+        return PairsTradingStrategy(strategy_params)
+    else:
+        raise ValueError("Invalid strategy type")
 
 
 def display_performance_metrics(metrics: dict[str, float]) -> None:
@@ -345,9 +624,9 @@ def display_performance_metrics(metrics: dict[str, float]) -> None:
     """
     st.header("Backtest Results")
     total_return_col, sharpe_ratio_col, max_drawdown_col = st.columns(3)
-    total_return_col.metric("Total Return", f"{metrics['Total Return']:.2%}")
-    sharpe_ratio_col.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.2f}")
-    max_drawdown_col.metric("Max Drawdown", f"{metrics['Max Drawdown']:.2%}")
+    total_return_col.metric("Total Return", f"{metrics['Total Return']:.4%}")
+    sharpe_ratio_col.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.4f}")
+    max_drawdown_col.metric("Max Drawdown", f"{metrics['Max Drawdown']:.4%}")
 
 
 def plot_equity_curve(results: pd.DataFrame, ticker_display: str) -> None:
@@ -356,7 +635,7 @@ def plot_equity_curve(results: pd.DataFrame, ticker_display: str) -> None:
 
     Args:
         results: The backtest results DataFrame.
-        ticker: The stock ticker symbol.
+        ticker_display: The stock ticker symbol or pair to display.
     """
     st.subheader("Equity Curve")
     fig = go.Figure(
@@ -376,7 +655,7 @@ def plot_strategy_returns(results: pd.DataFrame, ticker_display: str) -> None:
 
     Args:
         results: The backtest results DataFrame.
-        ticker: The stock ticker symbol.
+        ticker_display: The stock ticker symbol or pair to display.
     """
     st.subheader("Strategy Returns")
     fig = go.Figure(
@@ -390,144 +669,60 @@ def plot_strategy_returns(results: pd.DataFrame, ticker_display: str) -> None:
     st.plotly_chart(fig)
 
 
-def optimise_strategy_params(
-    data: pd.DataFrame,
-    strategy_type: str,
-    parameter_ranges: dict[str, range] | dict[str, list[float]],
-) -> tuple[dict[str, int] | dict[str, float], dict[str, float]]:
-    """
-    Optimises strategy parameters by testing all combinations within given
-    ranges.
-
-    Args:
-        data: Historical price data.
-        strategy_type: The type of strategy to optimize.
-        parameter_ranges: A dictionary of parameters and their possible values
-                          to test.
-
-    Returns:
-        A tuple containing the best parameters and their performance metrics.
-    """
-    best_params = None
-    best_metrics = None
-    best_sharpe_ratio = float("-inf")
-
-    param_names = list(parameter_ranges.keys())
-    param_values = []
-    for value in parameter_ranges.values():
-        if isinstance(value, range):
-            param_values.append(list(value))
-        elif isinstance(value, list):
-            param_values.append(value)
-        else:
-            raise ValueError(f"Unsupported parameter type: {type(value)}")
-
-    param_combinations = list(itertools.product(*param_values))
-
-    for params in param_combinations:
-        current_params = dict(zip(param_names, params))
-        _, metrics = run_backtest(data, strategy_type, current_params)
-
-        if metrics["Sharpe Ratio"] > best_sharpe_ratio:
-            best_sharpe_ratio = metrics["Sharpe Ratio"]
-            best_params = current_params
-            best_metrics = metrics
-
-    if not best_params or not best_metrics:
-        raise ValueError("Parameter optimisation failed")
-    return best_params, best_metrics
-
-
 def main():
     """
     Orchestrates the Streamlit app flow.
 
-    Sets up the user interface, collect inputs, runs the backtest, and displays
-    the results.
+    Sets up the user interface, collects inputs, runs the backtest, and
+    displays the results.
     """
     st.title("Quant Trading Strategy Backtester")
 
-    # Get user inputs for the backtest and strategy parameters.
+    # Get user inputs
     ticker, start_date, end_date, strategy_type, auto_select_tickers = (
         get_user_inputs_except_strategy_params()
     )
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
 
-    # Load the historical data from Yahoo Finance.
+    # Prepare the trading strategy based on user inputs
     if strategy_type == "Pairs Trading" and auto_select_tickers:
-        st.info(
-            f"Selecting the best pair from the top {NUM_TOP_COMPANIES} S&P "
-            "500 companies. This may take a while..."
+        data, ticker_display, strategy_params = (
+            prepare_pairs_trading_strategy_with_optimisation(
+                start_date, end_date, strategy_params, optimise
+            )
         )
-        start_time = time.time()
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
-        ticker, strategy_params, metrics = optimise_pairs_trading_tickers(
-            top_companies, start_date, end_date, strategy_params, optimise
-        )
-        ticker1, ticker2 = ticker
-        end_time = time.time()
-        duration = end_time - start_time
-        st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
-        st.header("Optimal Tickers and Parameters")
-        tickers_and_strategy_params = {
-            "ticker1": ticker1,
-            "ticker2": ticker2,
-        } | strategy_params
-        st.write(tickers_and_strategy_params)
-        data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
-        ticker_display = f"{ticker1} vs. {ticker2}"
-        results, _ = run_backtest(data, strategy_type, strategy_params)
     elif strategy_type == "Pairs Trading":
-        ticker1, ticker2 = ticker
-        data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
-        ticker_display = f"{ticker1} vs. {ticker2}"
-        if optimise:
-            st.info("Optimising parameters. This may take a while...")
-            start_time = time.time()
-            strategy_params, metrics = optimise_strategy_params(
-                data,
-                strategy_type,
-                cast(dict[str, range] | dict[str, list[float]], strategy_params),
+        data, ticker_display, strategy_params = (
+            prepare_pairs_trading_strategy_without_optimisation(
+                cast(tuple[str, str], ticker),
+                start_date,
+                end_date,
+                strategy_params,
+                optimise,
             )
-            end_time = time.time()
-            duration = end_time - start_time
-            st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
-            st.header("Optimal Parameters")
-            st.write(strategy_params)
-        results, metrics = run_backtest(data, strategy_type, strategy_params)
+        )
     else:
-        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
-        ticker_display = ticker
-        if optimise:
-            st.info("Optimising parameters. This may take a while...")
-            start_time = time.time()
-            strategy_params, metrics = optimise_strategy_params(
-                data,
-                strategy_type,
-                cast(dict[str, range] | dict[str, list[float]], strategy_params),
-            )
-            end_time = time.time()
-            duration = end_time - start_time
-            st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
-            st.header("Optimal Parameters")
-            st.write(strategy_params)
-        results, metrics = run_backtest(data, strategy_type, strategy_params)
+        data, ticker_display, strategy_params = prepare_single_ticker_strategy(
+            cast(str, ticker),
+            start_date,
+            end_date,
+            strategy_type,
+            strategy_params,
+            optimise,
+        )
 
     if data is None or data.empty:
-        st.write("No data available for the selected ticker and date range.")
+        st.write("No data available for the selected ticker and date range")
         return
-
-    # Display results and metrics from the backtest.
+    # Run the backtest and display the results
+    results, metrics = run_backtest(data, strategy_type, strategy_params)
     display_performance_metrics(metrics)
     plot_equity_curve(results, ticker_display)
     plot_strategy_returns(results, ticker_display)
 
+    # Display the raw data from Yahoo Finance for the backtest period
     st.header("Raw Data")
     st.write(data)
-
-    if optimise or (strategy_type == "Pairs Trading" and auto_select_tickers):
-        st.header("Optimal Parameters")
-        st.write(strategy_params)
 
 
 if __name__ == "__main__":
