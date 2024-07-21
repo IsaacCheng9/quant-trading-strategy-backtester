@@ -3,6 +3,8 @@ import datetime
 import pandas as pd
 from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
+)
+from quant_trading_strategy_backtester.optimiser import (
     optimise_pairs_trading_tickers,
     run_optimisation,
 )
@@ -25,14 +27,14 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.load_yfinance_data_two_tickers",
+        "quant_trading_strategy_backtester.data.load_yfinance_data_two_tickers",
         mock_load_data,
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.run_backtest", mock_run_backtest
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.optimise_strategy_params",
+        "quant_trading_strategy_backtester.optimiser.optimise_strategy_params",
         mock_optimise_strategy_params,
     )
 
@@ -105,8 +107,10 @@ def test_handle_pairs_trading_optimization(monkeypatch):
     end_date = datetime.date(2020, 12, 31)
     strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
 
-    data, ticker_display, optimised_params = prepare_pairs_trading_strategy_with_optimisation(
-        start_date, end_date, strategy_params, True
+    data, ticker_display, optimised_params = (
+        prepare_pairs_trading_strategy_with_optimisation(
+            start_date, end_date, strategy_params, True
+        )
     )
 
     assert isinstance(data, pd.DataFrame)
@@ -123,7 +127,7 @@ def test_run_optimisation(monkeypatch):
         return {"window": 25, "std_dev": 2.5}, {"Sharpe Ratio": 1.8}
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.optimise_strategy_params",
+        "quant_trading_strategy_backtester.optimiser.optimise_strategy_params",
         mock_optimise_strategy_params,
     )
 

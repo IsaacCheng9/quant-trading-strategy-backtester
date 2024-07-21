@@ -3,9 +3,11 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from quant_trading_strategy_backtester.app import (
+from quant_trading_strategy_backtester.data import (
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
+)
+from quant_trading_strategy_backtester.optimiser import (
     run_backtest,
 )
 
