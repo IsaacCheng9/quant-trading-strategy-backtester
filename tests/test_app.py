@@ -4,7 +4,7 @@ from typing import Any
 import pandas as pd
 import pytest
 from quant_trading_strategy_backtester.app import (
-    load_yfinance_data,
+    load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
     run_backtest,
 )
@@ -17,7 +17,7 @@ def test_load_yfinance_data(monkeypatch, mock_data: pd.DataFrame) -> None:
 
     monkeypatch.setattr("yfinance.download", mock_download)
 
-    data = load_yfinance_data(
+    data = load_yfinance_data_one_ticker(
         "AAPL", datetime.date(2020, 1, 1), datetime.date(2020, 1, 31)
     )
     assert isinstance(data, pd.DataFrame)

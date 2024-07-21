@@ -11,7 +11,9 @@ For instructions on how to run the application, refer to the README.md.
 
 import datetime
 import itertools
+import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, cast
 
 import pandas as pd
@@ -25,13 +27,15 @@ from quant_trading_strategy_backtester.strategy_templates import (
     PairsTradingStrategy,
 )
 
+logger = logging.getLogger(__name__)
+
 
 @st.cache_data
-def load_yfinance_data(
+def load_yfinance_data_one_ticker(
     ticker: str, start_date: datetime.date, end_date: datetime.date
 ) -> pd.DataFrame:
     """
-    Fetches historical stock data from Yahoo Finance.
+    Fetches historical stock data for a ticker from Yahoo Finance.
 
     Args:
         ticker: The stock ticker symbol.
@@ -65,6 +69,64 @@ def load_yfinance_data_two_tickers(
     data2 = yf.download(ticker2, start=start_date, end=end_date)
     combined_data = pd.DataFrame({"Close_1": data1["Close"], "Close_2": data2["Close"]})
     return combined_data
+
+
+@st.cache_data
+def get_ticker_market_cap(ticker: str) -> tuple[str, float | None]:
+    """
+    Fetch market cap data for a single ticker from Yahoo Finance.
+
+    Args:
+        ticker: The stock ticker symbol.
+
+    Returns:
+        A tuple containing the ticker symbol and market cap if available.
+    """
+    data = yf.Ticker(ticker).info
+    market_cap = data.get("marketCap")
+    if market_cap is None:
+        logger.error(f"Market cap data for {ticker} is unavailable")
+        return ticker, None
+
+    return ticker, market_cap
+
+
+@st.cache_data
+def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
+    """
+    Fetches the top X companies in the S&P 500 index by market cap using
+    yfinance.
+
+    Args:
+        num_companies: The number of top companies to fetch.
+
+    Returns:
+        A list of tuples containing the ticker symbols and market cap
+        of each company in the top X of the S&P 500 index, sorted by market
+        cap.
+    """
+    # Fetch the list of S&P 500 companies from the Wikipedia table.
+    SOURCE = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    sp500 = pd.read_html(SOURCE)[0]
+    tickers = sp500["Symbol"].tolist()
+
+    # Fetch market cap data with threading for faster execution.
+    sp500_companies = []
+    with ThreadPoolExecutor() as executor:
+        future_to_ticker = {
+            executor.submit(get_ticker_market_cap, ticker): ticker for ticker in tickers
+        }
+        for future in as_completed(future_to_ticker):
+            ticker, market_cap = future.result()
+            if market_cap is not None:
+                sp500_companies.append((ticker, market_cap))
+
+    # Sort companies by market cap (descending) and take the top X companies.
+    top_companies = sorted(sp500_companies, key=lambda x: x[1], reverse=True)[
+        :num_companies
+    ]
+
+    return top_companies
 
 
 def get_user_inputs_except_strategy_params() -> (
@@ -321,7 +383,7 @@ def main():
         data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
         ticker_display = f"{ticker1} vs. {ticker2}"
     else:
-        data = load_yfinance_data(ticker, start_date, end_date)
+        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
         ticker_display = ticker
     if data is None or data.empty:
         st.write("No data available for the selected ticker and date range.")
