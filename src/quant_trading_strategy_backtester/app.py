@@ -22,9 +22,11 @@ import streamlit as st
 import yfinance as yf
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.strategy_templates import (
+    TRADING_STRATEGIES,
     MeanReversionStrategy,
     MovingAverageCrossoverStrategy,
     PairsTradingStrategy,
+    Strategy,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,7 +61,8 @@ def prepare_pairs_trading_strategy_with_optimisation(
     """
     # Inform the user that the optimisation process is starting
     st.info(
-        f"Selecting the best pair from the top {NUM_TOP_COMPANIES} S&P 500 companies. This may take a while..."
+        f"Selecting the best pair from the top {NUM_TOP_COMPANIES} S&P 500 "
+        "companies. This may take a while..."
     )
 
     start_time = time.time()
@@ -286,12 +289,7 @@ def get_user_inputs_except_strategy_params() -> (
         selection for pairs trading.
     """
     strategy_type = cast(
-        str,
-        st.sidebar.selectbox(
-            "Strategy Type",
-            ["Mean Reversion", "Moving Average Crossover", "Pairs Trading"],
-            index=0,
-        ),
+        str, st.sidebar.selectbox("Strategy Type", list(TRADING_STRATEGIES), index=0)
     )
 
     auto_select_tickers = False
@@ -348,60 +346,86 @@ def get_user_inputs_for_strategy_params(
 
 
 def get_optimisation_ranges(strategy_type: str) -> dict[str, Any]:
-    if strategy_type == "Moving Average Crossover":
-        return {
-            "short_window": range(5, 51, 5),
-            "long_window": range(20, 201, 20),
-        }
-    elif strategy_type == "Mean Reversion":
-        return {
-            "window": range(5, 101, 5),
-            "std_dev": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
-        }
-    elif strategy_type == "Pairs Trading":
-        return {
-            "window": range(10, 101, 10),
-            "entry_z_score": [1.0, 1.5, 2.0, 2.5, 3.0],
-            "exit_z_score": [0.1, 0.5, 1.0, 1.5],
-        }
-    else:
+    """
+    Gets the parameter ranges for optimisation based on the selected strategy.
+
+    Args:
+        strategy_type: The type of strategy selected by the user.
+
+    Returns:
+        A dictionary containing the parameter ranges for optimisation.
+    """
+    if strategy_type not in TRADING_STRATEGIES:
         raise ValueError("Invalid strategy type")
+
+    match strategy_type:
+        case "Moving Average Crossover":
+            return {
+                "short_window": range(5, 51, 5),
+                "long_window": range(20, 201, 20),
+            }
+        case "Mean Reversion":
+            return {
+                "window": range(5, 101, 5),
+                "std_dev": [0.5, 1.0, 1.5, 2.0, 2.5, 3.0],
+            }
+        case "Pairs Trading":
+            return {
+                "window": range(10, 101, 10),
+                "entry_z_score": [1.0, 1.5, 2.0, 2.5, 3.0],
+                "exit_z_score": [0.1, 0.5, 1.0, 1.5],
+            }
+        case _:
+            raise ValueError(f"Unexpected strategy type: {strategy_type}")
 
 
 def get_fixed_params(strategy_type: str) -> dict[str, Any]:
-    if strategy_type == "Moving Average Crossover":
-        short_window = st.sidebar.slider(
-            "Short Window (Days)", min_value=5, max_value=50, value=20
-        )
-        long_window = st.sidebar.slider(
-            "Long Window (Days)", min_value=20, max_value=200, value=50
-        )
-        return {"short_window": short_window, "long_window": long_window}
-    elif strategy_type == "Mean Reversion":
-        window = st.sidebar.slider(
-            "Window (Days)", min_value=5, max_value=100, value=20
-        )
-        std_dev = st.sidebar.slider(
-            "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
-        )
-        return {"window": window, "std_dev": std_dev}
-    elif strategy_type == "Pairs Trading":
-        window = st.sidebar.slider(
-            "Window (Days)", min_value=10, max_value=100, value=50
-        )
-        entry_z_score = st.sidebar.slider(
-            "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
-        )
-        exit_z_score = st.sidebar.slider(
-            "Exit Z-Score", min_value=0.1, max_value=1.5, value=0.5, step=0.1
-        )
-        return {
-            "window": window,
-            "entry_z_score": entry_z_score,
-            "exit_z_score": exit_z_score,
-        }
-    else:
+    """
+    Gets the fixed, user-defined parameters for the selected strategy.
+
+    Args:
+        strategy_type: The type of strategy selected by the user.
+
+    Returns:
+        A dictionary containing the fixed parameters for the strategy.
+    """
+    if strategy_type not in TRADING_STRATEGIES:
         raise ValueError("Invalid strategy type")
+
+    match strategy_type:
+        case "Moving Average Crossover":
+            short_window = st.sidebar.slider(
+                "Short Window (Days)", min_value=5, max_value=50, value=20
+            )
+            long_window = st.sidebar.slider(
+                "Long Window (Days)", min_value=20, max_value=200, value=50
+            )
+            return {"short_window": short_window, "long_window": long_window}
+        case "Mean Reversion":
+            window = st.sidebar.slider(
+                "Window (Days)", min_value=5, max_value=100, value=20
+            )
+            std_dev = st.sidebar.slider(
+                "Standard Deviation", min_value=0.5, max_value=3.0, value=2.0, step=0.1
+            )
+            return {"window": window, "std_dev": std_dev}
+        case "Pairs Trading":
+            window = st.sidebar.slider(
+                "Window (Days)", min_value=10, max_value=100, value=50
+            )
+            entry_z_score = st.sidebar.slider(
+                "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
+            )
+            exit_z_score = st.sidebar.slider(
+                "Exit Z-Score", min_value=0.1, max_value=1.5, value=0.5, step=0.1
+            )
+            return {
+                "window": window,
+                "entry_z_score": entry_z_score,
+                "exit_z_score": exit_z_score,
+            }
+        case _:
+            raise ValueError(f"Unexpected strategy type: {strategy_type}")
 
 
 # Optimisation functions
@@ -610,15 +634,26 @@ def run_backtest(
     return results, metrics
 
 
-def create_strategy(strategy_type: str, strategy_params: dict[str, Any]):
-    if strategy_type == "Moving Average Crossover":
-        return MovingAverageCrossoverStrategy(strategy_params)
-    elif strategy_type == "Mean Reversion":
-        return MeanReversionStrategy(strategy_params)
-    elif strategy_type == "Pairs Trading":
-        return PairsTradingStrategy(strategy_params)
-    else:
+def create_strategy(strategy_type: str, strategy_params: dict[str, Any]) -> Strategy:
+    """
+    Creates a trading strategy object based on the selected strategy type.
+
+    Args:
+        strategy_type: The type of trading strategy.
+        strategy_params: A dictionary containing the strategy parameters.
+    """
+    if strategy_type not in TRADING_STRATEGIES:
         raise ValueError("Invalid strategy type")
+
+    match strategy_type:
+        case "Moving Average Crossover":
+            return MovingAverageCrossoverStrategy(strategy_params)
+        case "Mean Reversion":
+            return MeanReversionStrategy(strategy_params)
+        case "Pairs Trading":
+            return PairsTradingStrategy(strategy_params)
+        case _:
+            raise ValueError(f"Unexpected strategy type: {strategy_type}")
 
 
 def display_performance_metrics(metrics: dict[str, float]) -> None:
