@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+TRADING_STRATEGIES = {"Mean Reversion", "Moving Average Crossover", "Pairs Trading"}
+
 
 class Strategy(ABC):
     """
