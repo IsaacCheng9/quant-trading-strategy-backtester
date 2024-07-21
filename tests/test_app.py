@@ -8,7 +8,6 @@ from quant_trading_strategy_backtester.app import (
     load_yfinance_data_two_tickers,
     run_backtest,
 )
-from quant_trading_strategy_backtester.strategy_templates import Strategy
 
 
 def test_load_yfinance_data(monkeypatch, mock_data: pd.DataFrame) -> None:
@@ -49,7 +48,7 @@ def test_load_yfinance_data_two_tickers(monkeypatch, mock_data: pd.DataFrame) ->
     ],
 )
 def test_run_backtest(
-    mock_data: pd.DataFrame, strategy_type: Strategy, params: dict[str, Any]
+    mock_data: pd.DataFrame, strategy_type: str, params: dict[str, Any]
 ) -> None:
     if strategy_type == "Pairs Trading":
         # Create mock data for two assets
