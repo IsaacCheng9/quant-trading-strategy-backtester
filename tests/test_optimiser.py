@@ -1,3 +1,6 @@
+"""
+Contains tests for optimisation functions.
+"""
 import datetime
 from typing import Any
 
