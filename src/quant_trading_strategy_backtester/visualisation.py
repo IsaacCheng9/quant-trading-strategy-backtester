@@ -1,3 +1,7 @@
+"""
+Contains functions to display backtest results using Streamlit and Plotly.
+"""
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
