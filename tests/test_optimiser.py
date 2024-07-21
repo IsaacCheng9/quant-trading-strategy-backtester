@@ -1,11 +1,14 @@
 import datetime
+from typing import Any
 
 import pandas as pd
+import pytest
 from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
 )
 from quant_trading_strategy_backtester.optimiser import (
     optimise_pairs_trading_tickers,
+    run_backtest,
     run_optimisation,
 )
 
@@ -142,3 +145,36 @@ def test_run_optimisation(monkeypatch):
     assert set(optimised_params.keys()) == set(initial_params.keys())
     assert isinstance(metrics, dict)
     assert "Sharpe Ratio" in metrics
+
+
+@pytest.mark.parametrize(
+    "strategy_type,params",
+    [
+        ("Moving Average Crossover", {"short_window": 5, "long_window": 20}),
+        ("Mean Reversion", {"window": 5, "std_dev": 2.0}),
+        ("Pairs Trading", {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}),
+    ],
+)
+def test_run_backtest(
+    mock_data: pd.DataFrame, strategy_type: str, params: dict[str, Any]
+) -> None:
+    if strategy_type == "Pairs Trading":
+        # Create mock data for two assets
+        mock_data = pd.DataFrame(
+            {
+                "Close_1": mock_data["Close"],
+                "Close_2": mock_data["Close"] * 1.1,  # Slightly different prices
+            }
+        )
+
+    results, metrics = run_backtest(mock_data, strategy_type, params)
+    assert isinstance(results, pd.DataFrame)
+    assert isinstance(metrics, dict)
+    EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
+    for metric in EXPECTED_METRICS:
+        assert metric in metrics
+
+
+def test_run_backtest_invalid_strategy() -> None:
+    with pytest.raises(ValueError, match="Invalid strategy type"):
+        run_backtest(pd.DataFrame(), "Invalid Strategy", {})
