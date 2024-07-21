@@ -1,3 +1,6 @@
+"""
+Contains tests for the Backtester class and its methods.
+"""
 from typing import Any
 import pandas as pd
 import pytest

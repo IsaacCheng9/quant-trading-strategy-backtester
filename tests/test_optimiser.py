@@ -1,9 +1,17 @@
+"""
+Contains tests for optimisation functions.
+"""
 import datetime
+from typing import Any
 
 import pandas as pd
+import pytest
 from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
+)
+from quant_trading_strategy_backtester.optimiser import (
     optimise_pairs_trading_tickers,
+    run_backtest,
     run_optimisation,
 )
 
@@ -25,14 +33,14 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.load_yfinance_data_two_tickers",
+        "quant_trading_strategy_backtester.data.load_yfinance_data_two_tickers",
         mock_load_data,
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.run_backtest", mock_run_backtest
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.optimise_strategy_params",
+        "quant_trading_strategy_backtester.optimiser.optimise_strategy_params",
         mock_optimise_strategy_params,
     )
 
@@ -105,8 +113,10 @@ def test_handle_pairs_trading_optimization(monkeypatch):
     end_date = datetime.date(2020, 12, 31)
     strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
 
-    data, ticker_display, optimised_params = prepare_pairs_trading_strategy_with_optimisation(
-        start_date, end_date, strategy_params, True
+    data, ticker_display, optimised_params = (
+        prepare_pairs_trading_strategy_with_optimisation(
+            start_date, end_date, strategy_params, True
+        )
     )
 
     assert isinstance(data, pd.DataFrame)
@@ -123,7 +133,7 @@ def test_run_optimisation(monkeypatch):
         return {"window": 25, "std_dev": 2.5}, {"Sharpe Ratio": 1.8}
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.optimise_strategy_params",
+        "quant_trading_strategy_backtester.optimiser.optimise_strategy_params",
         mock_optimise_strategy_params,
     )
 
@@ -138,3 +148,36 @@ def test_run_optimisation(monkeypatch):
     assert set(optimised_params.keys()) == set(initial_params.keys())
     assert isinstance(metrics, dict)
     assert "Sharpe Ratio" in metrics
+
+
+@pytest.mark.parametrize(
+    "strategy_type,params",
+    [
+        ("Moving Average Crossover", {"short_window": 5, "long_window": 20}),
+        ("Mean Reversion", {"window": 5, "std_dev": 2.0}),
+        ("Pairs Trading", {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}),
+    ],
+)
+def test_run_backtest(
+    mock_data: pd.DataFrame, strategy_type: str, params: dict[str, Any]
+) -> None:
+    if strategy_type == "Pairs Trading":
+        # Create mock data for two assets
+        mock_data = pd.DataFrame(
+            {
+                "Close_1": mock_data["Close"],
+                "Close_2": mock_data["Close"] * 1.1,  # Slightly different prices
+            }
+        )
+
+    results, metrics = run_backtest(mock_data, strategy_type, params)
+    assert isinstance(results, pd.DataFrame)
+    assert isinstance(metrics, dict)
+    EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
+    for metric in EXPECTED_METRICS:
+        assert metric in metrics
+
+
+def test_run_backtest_invalid_strategy() -> None:
+    with pytest.raises(ValueError, match="Invalid strategy type"):
+        run_backtest(pd.DataFrame(), "Invalid Strategy", {})
