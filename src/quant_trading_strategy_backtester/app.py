@@ -482,10 +482,13 @@ def optimise_pairs_trading_tickers(
     # Display progress bar and status text, as this process may take a while.
     progress_bar = st.progress(0)
     status_text = st.empty()
+    prev_pair_processing_time = 0.0
 
     for i, (ticker1, ticker2) in enumerate(ticker_pairs):
+        start_time = time.time()
         status_text.text(
-            f"Evaluating pair {i + 1} / {total_combinations}: {ticker1} vs. {ticker2}"
+            f"Evaluating pair {i + 1} / {total_combinations}: {ticker1} vs. {ticker2} "
+            f"(prev. pair processing time: {prev_pair_processing_time:.4f} seconds)"
         )
         progress_bar.progress((i + 1) / total_combinations)
 
@@ -511,6 +514,9 @@ def optimise_pairs_trading_tickers(
             best_pair = (ticker1, ticker2)
             best_params = current_params
             best_metrics = current_metrics
+
+        end_time = time.time()
+        prev_pair_processing_time = end_time - start_time
 
     progress_bar.empty()
     status_text.empty()
