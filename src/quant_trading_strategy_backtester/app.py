@@ -29,7 +29,7 @@ from quant_trading_strategy_backtester.streamlit_ui import (
     get_user_inputs_except_strategy_params,
     get_user_inputs_for_strategy_params,
 )
-from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES, logger
+from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES
 from quant_trading_strategy_backtester.visualisation import (
     display_performance_metrics,
     plot_equity_curve,
