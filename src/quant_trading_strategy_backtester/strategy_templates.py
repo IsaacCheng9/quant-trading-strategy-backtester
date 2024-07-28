@@ -85,6 +85,18 @@ class MeanReversionStrategy(Strategy):
             include 'signal', 'mean', 'std', 'upper_band', 'lower_band', and
             'positions'.
         """
+        if data.is_empty():
+            return pl.DataFrame(
+                schema=[
+                    ("Date", pl.Date),
+                    ("Close", pl.Float64),
+                    ("short_mavg", pl.Float64),
+                    ("long_mavg", pl.Float64),
+                    ("signal", pl.Float64),
+                    ("positions", pl.Float64),
+                ]
+            )
+
         signals = data.select([pl.col("Date"), pl.col("Close")])
         signals = signals.with_columns(
             [
@@ -167,6 +179,18 @@ class MovingAverageCrossoverStrategy(Strategy):
             A DataFrame containing the generated trading signals. Columns
             include 'signal', 'short_mavg', 'long_mavg', and 'positions'.
         """
+        if data.is_empty():
+            return pl.DataFrame(
+                schema=[
+                    ("Date", pl.Date),
+                    ("Close", pl.Float64),
+                    ("short_mavg", pl.Float64),
+                    ("long_mavg", pl.Float64),
+                    ("signal", pl.Float64),
+                    ("positions", pl.Float64),
+                ]
+            )
+
         signals = data.select([pl.col("Date"), pl.col("Close")])
         signals = signals.with_columns(
             [
@@ -251,6 +275,17 @@ class PairsTradingStrategy(Strategy):
             - 'signal': The trading signal (-1, 0, or 1).
             - 'positions': The change in position from the previous period.
         """
+        if data.is_empty():
+            return pl.DataFrame(
+                schema=[
+                    ("Date", pl.Date),
+                    ("Close", pl.Float64),
+                    ("short_mavg", pl.Float64),
+                    ("long_mavg", pl.Float64),
+                    ("signal", pl.Float64),
+                    ("positions", pl.Float64),
+                ]
+            )
         if "Close_1" not in data.columns or "Close_2" not in data.columns:
             raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
 
@@ -325,6 +360,18 @@ class BuyAndHoldStrategy(Strategy):
         """
         Generates a buy signal on the first day and holds.
         """
+        if data.is_empty():
+            return pl.DataFrame(
+                schema=[
+                    ("Date", pl.Date),
+                    ("Close", pl.Float64),
+                    ("short_mavg", pl.Float64),
+                    ("long_mavg", pl.Float64),
+                    ("signal", pl.Float64),
+                    ("positions", pl.Float64),
+                ]
+            )
+
         signals = data.select([pl.col("Date"), pl.col("Close")])
         signals = signals.with_columns(
             [
