@@ -2,7 +2,7 @@
 Contains functions to display backtest results using Streamlit and Plotly.
 """
 
-import pandas as pd
+import polars as pl
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -21,7 +21,7 @@ def display_performance_metrics(metrics: dict[str, float]) -> None:
     max_drawdown_col.metric("Max Drawdown", f"{metrics['Max Drawdown']:.4%}")
 
 
-def plot_equity_curve(results: pd.DataFrame, ticker_display: str) -> None:
+def plot_equity_curve(results: pl.DataFrame, ticker_display: str) -> None:
     """
     Plots the equity curve of the backtest.
 
@@ -31,7 +31,11 @@ def plot_equity_curve(results: pd.DataFrame, ticker_display: str) -> None:
     """
     st.subheader("Equity Curve")
     fig = go.Figure(
-        data=go.Scatter(x=results.index, y=results["equity_curve"], mode="lines")
+        data=go.Scatter(
+            x=results["Date"].to_list(),
+            y=results["equity_curve"].to_list(),
+            mode="lines",
+        )
     )
     fig.update_layout(
         title=f"{ticker_display} Equity Curve",
@@ -41,7 +45,7 @@ def plot_equity_curve(results: pd.DataFrame, ticker_display: str) -> None:
     st.plotly_chart(fig)
 
 
-def plot_strategy_returns(results: pd.DataFrame, ticker_display: str) -> None:
+def plot_strategy_returns(results: pl.DataFrame, ticker_display: str) -> None:
     """
     Plots the strategy returns over time.
 
@@ -51,7 +55,11 @@ def plot_strategy_returns(results: pd.DataFrame, ticker_display: str) -> None:
     """
     st.subheader("Strategy Returns")
     fig = go.Figure(
-        data=go.Scatter(x=results.index, y=results["strategy_returns"], mode="lines")
+        data=go.Scatter(
+            x=results["Date"].to_list(),
+            y=results["strategy_returns"].to_list(),
+            mode="lines",
+        )
     )
     fig.update_layout(
         title=f"{ticker_display} Strategy Returns",
