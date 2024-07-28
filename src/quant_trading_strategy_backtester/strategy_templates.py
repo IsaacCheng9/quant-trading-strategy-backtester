@@ -9,10 +9,14 @@ different quantitative trading strategies.
 from abc import ABC, abstractmethod
 from typing import Any
 
-import numpy as np
-import pandas as pd
+import polars as pl
 
-TRADING_STRATEGIES = {"Mean Reversion", "Moving Average Crossover", "Pairs Trading"}
+TRADING_STRATEGIES = [
+    "Buy and Hold",
+    "Mean Reversion",
+    "Moving Average Crossover",
+    "Pairs Trading",
+]
 
 
 class Strategy(ABC):
@@ -29,7 +33,7 @@ class Strategy(ABC):
         raise NotImplementedError("Method '__init__' must be implemented.")
 
     @abstractmethod
-    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """
         Generate trading signals based on the input data.
 
@@ -64,7 +68,7 @@ class MeanReversionStrategy(Strategy):
         # (mean +/- std_dev).
         self.std_dev = float(params["std_dev"])
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """
         Generates trading signals for the given data.
 
@@ -81,26 +85,50 @@ class MeanReversionStrategy(Strategy):
             include 'signal', 'mean', 'std', 'upper_band', 'lower_band', and
             'positions'.
         """
-        signals = pd.DataFrame(index=data.index)
-        signals["mean"] = (
-            data["Close"].rolling(window=self.window, min_periods=1).mean()
+        signals = data.select([pl.col("Date"), pl.col("Close")])
+        signals = signals.with_columns(
+            [
+                pl.col("Close")
+                .rolling_mean(window_size=self.window, min_periods=1)
+                .alias("mean"),
+                pl.col("Close")
+                .rolling_std(window_size=self.window, min_periods=1)
+                .alias("std"),
+            ]
         )
-        signals["std"] = data["Close"].rolling(window=self.window, min_periods=1).std()
-        # Avoid division by zero.
-        signals["std"] = signals["std"].replace(0, np.nan)
+        # Avoid division by zero by replacing 0s with NaN.
+        signals = signals.with_columns(
+            [
+                pl.when(pl.col("std") == 0)
+                .then(pl.lit(float("nan")))
+                .otherwise(pl.col("std"))
+                .alias("std")
+            ]
+        )
 
-        signals["upper_band"] = signals["mean"] + (self.std_dev * signals["std"])
-        signals["lower_band"] = signals["mean"] - (self.std_dev * signals["std"])
+        signals = signals.with_columns(
+            [
+                (pl.col("mean") + (self.std_dev * pl.col("std"))).alias("upper_band"),
+                (pl.col("mean") - (self.std_dev * pl.col("std"))).alias("lower_band"),
+            ]
+        )
 
-        signals["signal"] = 0.0
-        # Buy signal
-        signals.loc[data["Close"] < signals["lower_band"], "signal"] = 1.0
-        # Sell signal
-        signals.loc[data["Close"] > signals["upper_band"], "signal"] = -1.0
+        signals = signals.with_columns(
+            [
+                # Buy signal
+                pl.when(pl.col("Close") < pl.col("lower_band"))
+                .then(1.0)
+                # Sell signal
+                .when(pl.col("Close") > pl.col("upper_band"))
+                .then(-1.0)
+                .otherwise(0.0)
+                .alias("signal")
+            ]
+        )
 
-        # Fill NaN values with 0 (no signal)
-        signals["signal"] = signals["signal"].fillna(0)
-        signals["positions"] = signals["signal"].diff()
+        signals = signals.with_columns(
+            [pl.col("signal").diff().fill_null(0).alias("positions")]
+        )
 
         return signals
 
@@ -122,7 +150,7 @@ class MovingAverageCrossoverStrategy(Strategy):
         self.short_window = int(params["short_window"])
         self.long_window = int(params["long_window"])
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """
         Generates trading signals for the given data.
 
@@ -139,24 +167,35 @@ class MovingAverageCrossoverStrategy(Strategy):
             A DataFrame containing the generated trading signals. Columns
             include 'signal', 'short_mavg', 'long_mavg', and 'positions'.
         """
-        signals = pd.DataFrame(index=data.index)
-        signals["signal"] = 0.0
-        signals["short_mavg"] = (
-            data["Close"]
-            .rolling(window=self.short_window, min_periods=1, center=False)
-            .mean()
+        signals = data.select([pl.col("Date"), pl.col("Close")])
+        signals = signals.with_columns(
+            [
+                pl.col("Close")
+                .rolling_mean(window_size=self.short_window, min_periods=1)
+                .alias("short_mavg"),
+                pl.col("Close")
+                .rolling_mean(window_size=self.long_window, min_periods=1)
+                .alias("long_mavg"),
+                pl.lit(0.0).alias("signal"),
+            ]
         )
-        signals["long_mavg"] = (
-            data["Close"]
-            .rolling(window=self.long_window, min_periods=1, center=False)
-            .mean()
+
+        signals = signals.with_columns(
+            [
+                # If the short-term moving average is above the long-term moving
+                # average, generate a buy signal.
+                pl.when(pl.col("short_mavg") > pl.col("long_mavg"))
+                .then(1.0)
+                .otherwise(0.0)
+                .alias("signal")
+            ]
         )
-        # If the short-term moving average is above the long-term moving
-        # average, generate a buy signal.
-        signals.loc[signals["short_mavg"] > signals["long_mavg"], "signal"] = 1.0
+
         # If the short-term moving average is below the long-term moving
         # average, generate a sell signal by setting all non-buy signals to -1.
-        signals["positions"] = signals["signal"].diff()
+        signals = signals.with_columns(
+            [pl.col("signal").diff().fill_null(0.0).alias("positions")]
+        )
 
         return signals
 
@@ -183,7 +222,7 @@ class PairsTradingStrategy(Strategy):
         # The z-score threshold for exiting a trade.
         self.exit_z_score = float(params["exit_z_score"])
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """
         Generates trading signals based on the pairs trading strategy.
 
@@ -215,28 +254,82 @@ class PairsTradingStrategy(Strategy):
         if "Close_1" not in data.columns or "Close_2" not in data.columns:
             raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
 
-        signals = pd.DataFrame(index=data.index)
+        signals = data.select(
+            [
+                pl.col("Date"),
+                pl.col("Close_1"),
+                pl.col("Close_2"),
+                (pl.col("Close_1") - pl.col("Close_2")).alias("spread"),
+            ]
+        )
 
-        # Calculate the spread.
-        signals["spread"] = data["Close_1"] - data["Close_2"]
+        # Calculate rolling mean and std, handling potential division by zero
+        signals = signals.with_columns(
+            [
+                pl.col("spread")
+                .rolling_mean(window_size=self.window, min_periods=1)
+                .alias("spread_mean"),
+                pl.col("spread")
+                .rolling_std(window_size=self.window, min_periods=1)
+                .alias("spread_std"),
+            ]
+        )
 
-        # Calculate z-score of the spread.
-        signals["z_score"] = (
-            signals["spread"] - signals["spread"].rolling(window=self.window).mean()
-        ) / signals["spread"].rolling(window=self.window).std()
+        # Calculate z-score, avoiding division by zero
+        signals = signals.with_columns(
+            [
+                pl.when(pl.col("spread_std") != 0)
+                .then((pl.col("spread") - pl.col("spread_mean")) / pl.col("spread_std"))
+                .otherwise(0)
+                .alias("z_score")
+            ]
+        )
 
-        # Generate trading signals.
-        signals["signal"] = 0.0
-        # Short stock 1, long stock 2.
-        signals.loc[signals["z_score"] > self.entry_z_score, "signal"] = -1
-        # Long stock 1, short stock 2.
-        signals.loc[signals["z_score"] < -self.entry_z_score, "signal"] = 1
-        # Close positions
-        signals.loc[signals["z_score"].abs() < self.exit_z_score, "signal"] = 0
+        # Generate trading signals
+        signals = signals.with_columns(
+            [
+                pl.when(pl.col("z_score") > self.entry_z_score)
+                .then(-1)
+                .when(pl.col("z_score") < -self.entry_z_score)
+                .then(1)
+                .when(pl.col("z_score").abs() < self.exit_z_score)
+                .then(0)
+                .otherwise(None)
+                .alias("signal")
+            ]
+        )
 
-        # Handle missing data
-        signals.loc[data["Close_1"].isna() | data["Close_2"].isna(), "signal"] = np.nan
+        # Fill forward the signal
+        signals = signals.with_columns(
+            [pl.col("signal").forward_fill().fill_null(0).alias("signal")]
+        )
 
-        signals["positions"] = signals["signal"].diff()
+        # Calculate positions (changes in signal)
+        signals = signals.with_columns(
+            [pl.col("signal").diff().fill_null(0).alias("positions")]
+        )
 
+        return signals
+
+
+class BuyAndHoldStrategy(Strategy):
+    """
+    Implements a simple buy and hold strategy.
+    """
+
+    def __init__(self, params: dict[str, Any]):
+        # No parameters needed for this strategy
+        pass
+
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
+        """
+        Generates a buy signal on the first day and holds.
+        """
+        signals = data.select([pl.col("Date"), pl.col("Close")])
+        signals = signals.with_columns(
+            [
+                pl.lit(1).alias("signal"),
+                pl.lit(1).alias("positions").first().alias("positions"),
+            ]
+        )
         return signals

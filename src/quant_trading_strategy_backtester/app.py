@@ -13,7 +13,7 @@ import datetime
 import time
 from typing import Any, cast
 
-import pandas as pd
+import polars as pl
 import streamlit as st
 from quant_trading_strategy_backtester.data import (
     get_top_sp500_companies,
@@ -44,7 +44,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
-) -> tuple[pd.DataFrame, str, dict[str, int | float]]:
+) -> tuple[pl.DataFrame, str, dict[str, int | float]]:
     """
     Handles the optimisation process for pairs trading strategy.
 
@@ -107,7 +107,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
-) -> tuple[pd.DataFrame, str, dict[str, Any]]:
+) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles the pairs trading strategy for user-selected tickers.
 
@@ -145,7 +145,7 @@ def prepare_single_ticker_strategy(
     strategy_type: str,
     strategy_params: dict[str, Any],
     optimise: bool,
-) -> tuple[pd.DataFrame, str, dict[str, Any]]:
+) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles strategies for a single ticker.
 
@@ -170,7 +170,7 @@ def prepare_single_ticker_strategy(
     data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
     ticker_display = ticker
 
-    if optimise:
+    if optimise and strategy_type != "Buy and Hold":
         strategy_params, _ = run_optimisation(data, strategy_type, strategy_params)
 
     return data, ticker_display, strategy_params
@@ -218,9 +218,10 @@ def main():
             optimise,
         )
 
-    if data is None or data.empty:
+    if data is None or data.is_empty():
         st.write("No data available for the selected ticker and date range")
         return
+
     # Run the backtest and display the results
     results, metrics = run_backtest(data, strategy_type, strategy_params)
     display_performance_metrics(metrics)

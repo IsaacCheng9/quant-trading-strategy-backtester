@@ -24,7 +24,7 @@ def get_user_inputs_except_strategy_params() -> (
         selection for pairs trading.
     """
     strategy_type = cast(
-        str, st.sidebar.selectbox("Strategy Type", list(TRADING_STRATEGIES), index=0)
+        str, st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
     )
 
     auto_select_tickers = False
@@ -47,11 +47,11 @@ def get_user_inputs_except_strategy_params() -> (
 
     start_date: datetime.date = cast(
         datetime.date,
-        st.sidebar.date_input("Start Date", value=pd.to_datetime("2020-01-01")),
+        st.sidebar.date_input("Start Date", value=datetime.date(2020, 1, 1)),
     )
     end_date: datetime.date = cast(
         datetime.date,
-        st.sidebar.date_input("End Date", value=pd.to_datetime("2023-12-31")),
+        st.sidebar.date_input("End Date", value=datetime.date(2023, 12, 31)),
     )
 
     return ticker, start_date, end_date, strategy_type, auto_select_tickers
@@ -87,6 +87,8 @@ def get_optimisation_ranges(strategy_type: str) -> dict[str, Any]:
                 "entry_z_score": [1.0, 1.5, 2.0, 2.5, 3.0],
                 "exit_z_score": [0.1, 0.5, 1.0, 1.5],
             }
+        case "Buy and Hold":
+            return {}  # No parameters to optimise
         case _:
             raise ValueError(f"Unexpected strategy type: {strategy_type}")
 
@@ -136,6 +138,8 @@ def get_fixed_params(strategy_type: str) -> dict[str, Any]:
                 "entry_z_score": entry_z_score,
                 "exit_z_score": exit_z_score,
             }
+        case "Buy and Hold":
+            return {}  # No parameters needed
         case _:
             raise ValueError(f"Unexpected strategy type: {strategy_type}")
 
@@ -153,6 +157,9 @@ def get_user_inputs_for_strategy_params(
     Returns:
         A tuple containing a boolean indicating whether to optimise, and a dictionary of strategy parameters.
     """
+    if strategy_type == "Buy and Hold":
+        return False, {}  # No parameters for Buy and Hold strategy
+
     optimise = st.sidebar.checkbox("Optimise Strategy Parameters")
 
     if optimise:
