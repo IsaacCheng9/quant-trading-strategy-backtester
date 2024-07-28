@@ -26,7 +26,7 @@ def load_yfinance_data_one_ticker(
         end_date: The end date for the data.
 
     Returns:
-        A DataFrame containing the historical stock data.
+        A Polars DataFrame containing the historical stock data.
     """
     data = yf.download(ticker, start=start_date, end=end_date)
     return pl.from_pandas(data.reset_index())
@@ -46,18 +46,20 @@ def load_yfinance_data_two_tickers(
         end_date: The end date for the data.
 
     Returns:
-        A DataFrame containing the historical stock data for both tickers.
+        A Polars DataFrame containing the historical stock data for both tickers.
     """
     data1 = yf.download(ticker1, start=start_date, end=end_date)
     data2 = yf.download(ticker2, start=start_date, end=end_date)
+    data1 = data1.reset_index()
+    data2 = data2.reset_index()
+    combined_data = pl.DataFrame(
+        {
+            "Date": pl.from_pandas(data1["Date"]),
+            "Close_1": pl.from_pandas(data1["Close"]),
+            "Close_2": pl.from_pandas(data2["Close"]),
+        }
+    )
 
-    pl_data1 = pl.from_pandas(data1.reset_index()[["Date", "Close"]])
-    pl_data2 = pl.from_pandas(data2.reset_index()[["Date", "Close"]])
-
-    pl_data1 = pl_data1.rename({"Close": "Close_1"})
-    pl_data2 = pl_data2.rename({"Close": "Close_2"})
-
-    combined_data = pl_data1.join(pl_data2, on="Date", how="outer")
     return combined_data
 
 
