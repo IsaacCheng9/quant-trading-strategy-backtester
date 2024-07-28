@@ -37,7 +37,8 @@ def mock_yfinance_pairs_data() -> pd.DataFrame:
     dates = pd.date_range(start="1/1/2020", end="1/31/2020")
     data = pd.DataFrame(
         {
-            "Close": [100.0 + i * 0.1 for i in range(len(dates))],
+            "Close_1": [100.0 + i * 0.1 for i in range(len(dates))],
+            "Close_2": [100.0 + i * 0.05 for i in range(len(dates))],
         },
         index=dates,
     )
