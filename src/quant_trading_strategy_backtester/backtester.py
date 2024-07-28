@@ -7,8 +7,7 @@ designed to work with the strategy templates defined in a different module in
 this repository.
 """
 
-import numpy as np
-import pandas as pd
+import polars as pl
 from quant_trading_strategy_backtester.strategy_templates import Strategy
 
 
@@ -27,14 +26,14 @@ class Backtester:
     """
 
     def __init__(
-        self, data: pd.DataFrame, strategy: Strategy, initial_capital: float = 100000.0
+        self, data: pl.DataFrame, strategy: Strategy, initial_capital: float = 100000.0
     ) -> None:
         self.data = data
         self.strategy = strategy
         self.initial_capital = initial_capital
         self.results = None
 
-    def run(self) -> pd.DataFrame:
+    def run(self) -> pl.DataFrame:
         """
         Runs the backtest.
 
@@ -48,7 +47,7 @@ class Backtester:
         self.results = self._calculate_returns(signals)
         return self.results
 
-    def _calculate_returns(self, signals: pd.DataFrame) -> pd.DataFrame:
+    def _calculate_returns(self, signals: pl.DataFrame) -> pl.DataFrame:
         """
         Calculates returns based on the generated signals.
 
@@ -61,30 +60,51 @@ class Backtester:
         Returns:
             A DataFrame containing calculated returns and related metrics.
         """
-        portfolio = pd.DataFrame(index=signals.index)
-        portfolio["positions"] = signals["positions"]
+        # Ensure 'Date' column is present in signals DataFrame
+        if "Date" not in signals.columns:
+            raise ValueError("'Date' column is missing from the signals DataFrame")
 
         # Pairs trading
         if "Close_1" in self.data.columns and "Close_2" in self.data.columns:
-            portfolio["asset_returns"] = (
-                self.data["Close_1"].pct_change() - self.data["Close_2"].pct_change()
-            )
+            asset_returns = (
+                self.data["Close_1"] - self.data["Close_1"].shift(1)
+            ) / self.data["Close_1"].shift(1) - (
+                self.data["Close_2"] - self.data["Close_2"].shift(1)
+            ) / self.data["Close_2"].shift(1)
         # Single asset trading
         elif "Close" in self.data.columns:
-            portfolio["asset_returns"] = self.data["Close"].pct_change()
+            asset_returns = (
+                self.data["Close"] - self.data["Close"].shift(1)
+            ) / self.data["Close"].shift(1)
         else:
             raise ValueError("Data does not contain required 'Close' columns")
 
-        portfolio["strategy_returns"] = (
-            portfolio["positions"].shift(1) * portfolio["asset_returns"]
+        portfolio = signals.with_columns(
+            [
+                pl.col("positions"),
+                asset_returns.alias("asset_returns"),
+                (pl.col("positions").shift(1) * asset_returns).alias(
+                    "strategy_returns"
+                ),
+            ]
         )
+
         # Handle potential NaN or inf values
-        portfolio["strategy_returns"] = (
-            portfolio["strategy_returns"].replace([np.inf, -np.inf], np.nan).fillna(0)
+        portfolio = portfolio.with_columns(
+            [
+                pl.col("strategy_returns")
+                .replace({float("inf"): None, float("-inf"): None})
+                .fill_null(0)
+            ]
         )
-        portfolio["cumulative_returns"] = (1 + portfolio["strategy_returns"]).cumprod()
-        portfolio["equity_curve"] = (
-            self.initial_capital * portfolio["cumulative_returns"]
+
+        portfolio = portfolio.with_columns(
+            [
+                (1 + pl.col("strategy_returns")).cum_prod().alias("cumulative_returns"),
+                (
+                    self.initial_capital * (1 + pl.col("strategy_returns")).cum_prod()
+                ).alias("equity_curve"),
+            ]
         )
 
         return portfolio
@@ -103,19 +123,19 @@ class Backtester:
         if self.results is None:
             return None
 
-        total_return = self.results["cumulative_returns"].iloc[-1] - 1
+        total_return = self.results["cumulative_returns"].tail(1)[0] - 1
 
         # Measure the risk-adjusted return, assuming 252 trading days per year.
         returns_mean = self.results["strategy_returns"].mean()
         returns_std = self.results["strategy_returns"].std()
-        if returns_std != 0 and not np.isnan(returns_std):
-            sharpe_ratio = np.sqrt(252) * returns_mean / returns_std
+        if returns_std != 0 and not pl.Series([returns_std]).is_nan()[0]:
+            sharpe_ratio = (252**0.5) * returns_mean / returns_std
         else:
-            sharpe_ratio = np.nan
+            sharpe_ratio = float("nan")
 
         # Measure the maximum loss from a peak to a trough of the equity curve.
         drawdowns = (
-            self.results["equity_curve"] / self.results["equity_curve"].cummax() - 1
+            self.results["equity_curve"] / self.results["equity_curve"].cum_max() - 1
         )
         max_drawdown = drawdowns.min()
 
