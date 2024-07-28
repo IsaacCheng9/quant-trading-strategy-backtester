@@ -1,8 +1,11 @@
 """
 Contains tests for the Backtester class and its methods.
 """
+
+import datetime
 from typing import Any
-import pandas as pd
+
+import polars as pl
 import pytest
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.strategy_templates import (
@@ -19,13 +22,13 @@ from quant_trading_strategy_backtester.strategy_templates import (
         (
             MovingAverageCrossoverStrategy,
             {"short_window": 5, "long_window": 20},
-            "mock_data",
+            "mock_polars_data",
         ),
-        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}, "mock_data"),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}, "mock_polars_data"),
         (
             PairsTradingStrategy,
             {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
-            "mock_pairs_data",
+            "mock_polars_pairs_data",
         ),
     ],
 )
@@ -38,7 +41,12 @@ def test_backtester_initialization(
     data = request.getfixturevalue(data_fixture)
     strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(data, strategy)
-    assert backtester.data is data
+
+    # Compare DataFrames
+    assert backtester.data.shape == data.shape
+    for col in data.columns:
+        assert (backtester.data[col] == data[col]).all()
+
     assert isinstance(backtester.strategy, strategy_class)  # type: ignore
     assert backtester.initial_capital == 100000.0
 
@@ -49,13 +57,13 @@ def test_backtester_initialization(
         (
             MovingAverageCrossoverStrategy,
             {"short_window": 5, "long_window": 20},
-            "mock_data",
+            "mock_polars_data",
         ),
-        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}, "mock_data"),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}, "mock_polars_data"),
         (
             PairsTradingStrategy,
             {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
-            "mock_pairs_data",
+            "mock_polars_pairs_data",
         ),
     ],
 )
@@ -69,7 +77,7 @@ def test_backtester_run(
     strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(data, strategy)
     results = backtester.run()
-    assert isinstance(results, pd.DataFrame)
+    assert isinstance(results, pl.DataFrame)
     EXPECTED_COLS = {"positions", "strategy_returns", "equity_curve"}
     for col in EXPECTED_COLS:
         assert col in results.columns
@@ -81,13 +89,13 @@ def test_backtester_run(
         (
             MovingAverageCrossoverStrategy,
             {"short_window": 5, "long_window": 20},
-            "mock_data",
+            "mock_polars_data",
         ),
-        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}, "mock_data"),
+        (MeanReversionStrategy, {"window": 5, "std_dev": 2.0}, "mock_polars_data"),
         (
             PairsTradingStrategy,
             {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
-            "mock_pairs_data",
+            "mock_polars_pairs_data",
         ),
     ],
 )
@@ -122,15 +130,28 @@ def test_backtester_get_performance_metrics(
 def test_backtester_with_invalid_data(
     strategy_class: Strategy, params: dict[str, Any]
 ) -> None:
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
     if strategy_class == PairsTradingStrategy:
-        invalid_data = pd.DataFrame({"Invalid_1": [1, 2, 3], "Invalid_2": [4, 5, 6]})
+        invalid_data = pl.DataFrame(
+            {
+                "Date": dates,
+                "Close_1": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                # Missing Close_2 column
+            }
+        )
     else:
-        invalid_data = pd.DataFrame({"Invalid": [1, 2, 3]})
+        invalid_data = pl.DataFrame(
+            {
+                "Date": dates,
+                # Missing Close column
+                "Open": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            }
+        )
 
     strategy = strategy_class(params)  # type: ignore
     backtester = Backtester(invalid_data, strategy)
 
-    with pytest.raises((KeyError, ValueError)):
+    with pytest.raises((KeyError, ValueError, pl.exceptions.ColumnNotFoundError)):
         backtester.run()
 
 
@@ -148,14 +169,21 @@ def test_backtester_with_invalid_data(
 def test_backtester_with_insufficient_data_all_strategies(
     strategy_class: Strategy, params: dict[str, Any]
 ) -> None:
+    dates = [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
     if strategy_class == PairsTradingStrategy:
-        insufficient_data = pd.DataFrame(
-            {"Close_1": [100, 101], "Close_2": [100, 102]},
-            index=pd.date_range(start="2020-01-01", periods=2),
+        insufficient_data = pl.DataFrame(
+            {
+                "Date": dates,
+                "Close_1": [100, 101],
+                "Close_2": [100, 102],
+            }
         )
     else:
-        insufficient_data = pd.DataFrame(
-            {"Close": [100, 101]}, index=pd.date_range(start="2020-01-01", periods=2)
+        insufficient_data = pl.DataFrame(
+            {
+                "Date": dates,
+                "Close": [100, 101],
+            }
         )
 
     strategy = strategy_class(params)  # type: ignore
@@ -166,8 +194,8 @@ def test_backtester_with_insufficient_data_all_strategies(
     # Allow for small floating-point errors
     assert abs(results["positions"].sum()) < 1e-6
     # Check that the equity curve doesn't change significantly
-    assert abs(results["equity_curve"].iloc[-1] - backtester.initial_capital) < 1e-6
+    assert abs(results["equity_curve"].tail(1)[0] - backtester.initial_capital) < 1e-6
     # Check that cumulative returns are close to 1 (no significant change)
-    assert abs(results["cumulative_returns"].iloc[-1] - 1) < 1e-6
+    assert abs(results["cumulative_returns"].tail(1)[0] - 1) < 1e-6
     # Verify that the DataFrame has the expected number of rows
     assert len(results) == len(insufficient_data)
