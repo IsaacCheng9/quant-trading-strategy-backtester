@@ -13,6 +13,7 @@ _Try the deployed app
 
 ## Trading Strategies Supported
 
+- Buy and Hold
 - Mean Reversion
 - Moving Average Crossover
 - Pairs Trading
