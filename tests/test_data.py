@@ -3,7 +3,6 @@ Contains tests for data fetching functions.
 """
 
 import datetime
-import pytest
 
 import pandas as pd
 import polars as pl
