@@ -8,12 +8,13 @@ import itertools
 import time
 from typing import Any, cast
 
-import pandas as pd
+import polars as pl
 import streamlit as st
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.data import load_yfinance_data_two_tickers
 from quant_trading_strategy_backtester.strategy_templates import (
     TRADING_STRATEGIES,
+    BuyAndHoldStrategy,
     MeanReversionStrategy,
     MovingAverageCrossoverStrategy,
     PairsTradingStrategy,
@@ -22,7 +23,7 @@ from quant_trading_strategy_backtester.strategy_templates import (
 
 
 def run_optimisation(
-    data: pd.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
+    data: pl.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """
     Runs the optimisation process for strategy parameters.
@@ -63,7 +64,7 @@ def run_optimisation(
 
 
 def optimise_strategy_params(
-    data: pd.DataFrame,
+    data: pl.DataFrame,
     strategy_type: str,
     parameter_ranges: dict[str, range] | dict[str, list[float]],
 ) -> tuple[dict[str, int] | dict[str, float], dict[str, float]]:
@@ -163,7 +164,7 @@ def optimise_pairs_trading_tickers(
         progress_bar.progress((i + 1) / total_combinations)
 
         data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
-        if data is None or data.empty:
+        if data is None or data.is_empty():
             continue
 
         if optimise:
@@ -197,8 +198,8 @@ def optimise_pairs_trading_tickers(
 
 
 def run_backtest(
-    data: pd.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
-) -> tuple[pd.DataFrame, dict]:
+    data: pl.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
+) -> tuple[pl.DataFrame, dict]:
     """
     Executes the backtest using the selected strategy and parameters.
 
@@ -233,6 +234,8 @@ def create_strategy(strategy_type: str, strategy_params: dict[str, Any]) -> Stra
         raise ValueError("Invalid strategy type")
 
     match strategy_type:
+        case "Buy and Hold":
+            return BuyAndHoldStrategy(strategy_params)
         case "Moving Average Crossover":
             return MovingAverageCrossoverStrategy(strategy_params)
         case "Mean Reversion":

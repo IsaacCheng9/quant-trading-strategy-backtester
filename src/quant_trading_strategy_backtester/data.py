@@ -7,6 +7,7 @@ import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
+import polars as pl
 import streamlit as st
 import yfinance as yf
 from quant_trading_strategy_backtester.utils import logger
@@ -15,7 +16,7 @@ from quant_trading_strategy_backtester.utils import logger
 @st.cache_data
 def load_yfinance_data_one_ticker(
     ticker: str, start_date: datetime.date, end_date: datetime.date
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Fetches historical stock data for a ticker from Yahoo Finance.
 
@@ -25,16 +26,16 @@ def load_yfinance_data_one_ticker(
         end_date: The end date for the data.
 
     Returns:
-        A DataFrame containing the historical stock data.
+        A Polars DataFrame containing the historical stock data.
     """
     data = yf.download(ticker, start=start_date, end=end_date)
-    return data
+    return pl.from_pandas(data.reset_index())
 
 
 @st.cache_data
 def load_yfinance_data_two_tickers(
     ticker1: str, ticker2: str, start_date: datetime.date, end_date: datetime.date
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Fetches historical stock data for two tickers from Yahoo Finance.
 
@@ -45,11 +46,20 @@ def load_yfinance_data_two_tickers(
         end_date: The end date for the data.
 
     Returns:
-        A DataFrame containing the historical stock data for both tickers.
+        A Polars DataFrame containing the historical stock data for both tickers.
     """
     data1 = yf.download(ticker1, start=start_date, end=end_date)
     data2 = yf.download(ticker2, start=start_date, end=end_date)
-    combined_data = pd.DataFrame({"Close_1": data1["Close"], "Close_2": data2["Close"]})
+    data1 = data1.reset_index()
+    data2 = data2.reset_index()
+    combined_data = pl.DataFrame(
+        {
+            "Date": pl.from_pandas(data1["Date"]),
+            "Close_1": pl.from_pandas(data1["Close"]),
+            "Close_2": pl.from_pandas(data2["Close"]),
+        }
+    )
+
     return combined_data
 
 
@@ -89,8 +99,8 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     """
     # Fetch the list of S&P 500 companies from the Wikipedia table.
     SOURCE = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    sp500 = pd.read_html(SOURCE)[0]
-    tickers = sp500["Symbol"].tolist()
+    sp500_constituents = pd.read_html(SOURCE)[0]
+    tickers = sp500_constituents["Symbol"].to_list()
 
     # Fetch market cap data with threading for faster execution.
     sp500_companies = []
