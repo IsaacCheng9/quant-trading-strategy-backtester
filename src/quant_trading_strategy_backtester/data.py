@@ -122,7 +122,7 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
 
 
 @st.cache_data
-def get_company_name(ticker: str) -> str | None:
+def get_full_company_name(ticker: str) -> str | None:
     """
     Fetches the full company name for a given ticker symbol.
 

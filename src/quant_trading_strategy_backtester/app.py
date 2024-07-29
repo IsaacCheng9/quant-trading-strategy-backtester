@@ -16,7 +16,7 @@ from typing import Any, cast
 import polars as pl
 import streamlit as st
 from quant_trading_strategy_backtester.data import (
-    get_company_name,
+    get_full_company_name,
     get_top_sp500_companies,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
@@ -193,9 +193,9 @@ def main():
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
     # Get full company name(s)
     if isinstance(ticker, tuple):
-        company_name = f"{get_company_name(ticker[0])} vs {get_company_name(ticker[1])}"
+        company_name = f"{get_full_company_name(ticker[0])} vs {get_full_company_name(ticker[1])}"
     elif isinstance(ticker, str):
-        company_name = get_company_name(ticker)
+        company_name = get_full_company_name(ticker)
     else:
         company_name = "Selected Companies"  # For auto-selected pairs
 
