@@ -71,7 +71,7 @@ def plot_strategy_returns(
         )
     )
     fig.update_layout(
-        title=f"{company_name} ({ticker_display}) Strategy Returns",
+        title=f"{company_name} ({ticker_display}) Strategy Daily Returns",
         xaxis_title="Date",
         yaxis_title="Returns",
     )
