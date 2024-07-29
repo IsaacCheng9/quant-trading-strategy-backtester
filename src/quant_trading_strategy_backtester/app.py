@@ -230,7 +230,11 @@ def main():
 
     # Display the raw data from Yahoo Finance for the backtest period
     st.header("Raw Data")
-    st.write(data)
+    st.dataframe(
+        data.to_pandas(),
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 if __name__ == "__main__":
