@@ -16,6 +16,7 @@ from typing import Any, cast
 import polars as pl
 import streamlit as st
 from quant_trading_strategy_backtester.data import (
+    get_company_name,
     get_top_sp500_companies,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
@@ -190,6 +191,13 @@ def main():
         get_user_inputs_except_strategy_params()
     )
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
+    # Get full company name(s)
+    if isinstance(ticker, tuple):
+        company_name = f"{get_company_name(ticker[0])} vs {get_company_name(ticker[1])}"
+    elif isinstance(ticker, str):
+        company_name = get_company_name(ticker)
+    else:
+        company_name = "Selected Companies"  # For auto-selected pairs
 
     # Prepare the trading strategy based on user inputs
     if strategy_type == "Pairs Trading" and auto_select_tickers:
@@ -224,12 +232,12 @@ def main():
 
     # Run the backtest and display the results
     results, metrics = run_backtest(data, strategy_type, strategy_params)
-    display_performance_metrics(metrics)
-    plot_equity_curve(results, ticker_display)
-    plot_strategy_returns(results, ticker_display)
+    display_performance_metrics(metrics, company_name)
+    plot_equity_curve(results, ticker_display, company_name)
+    plot_strategy_returns(results, ticker_display, company_name)
 
     # Display the raw data from Yahoo Finance for the backtest period
-    st.header("Raw Data")
+    st.header(f"Raw Data for {company_name}")
     st.dataframe(
         data.to_pandas(),
         use_container_width=True,
