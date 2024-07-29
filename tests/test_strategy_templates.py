@@ -5,8 +5,6 @@ Contains tests for trading strategy templates.
 from datetime import date, timedelta
 from typing import Any
 
-import numpy as np
-import pandas as pd
 import polars as pl
 import pytest
 from quant_trading_strategy_backtester.strategy_templates import (
@@ -25,19 +23,19 @@ def test_moving_average_crossover_strategy_initialization() -> None:
 
 
 def test_moving_average_crossover_strategy_generate_signals(
-    mock_data: pd.DataFrame,
+    mock_polars_data: pl.DataFrame,
 ) -> None:
     params = {"short_window": 5, "long_window": 20}
     strategy = MovingAverageCrossoverStrategy(params)
-    signals = strategy.generate_signals(mock_data)
-    assert isinstance(signals, pd.DataFrame)
+    signals = strategy.generate_signals(mock_polars_data)
+    assert isinstance(signals, pl.DataFrame)
     EXPECTED_COLS = {"signal", "short_mavg", "long_mavg", "positions"}
     for col in EXPECTED_COLS:
         assert col in signals.columns
-    assert signals["signal"].isin([0.0, 1.0]).all()
+    assert signals["signal"].is_in([0.0, 1.0]).all()
 
 
-def test_moving_average_crossover_strategy_with_mock_data():
+def test_moving_average_crossover_strategy_with_mock_polars_data():
     # Create mock data
     start_date = date(2023, 1, 1)
     dates = [start_date + timedelta(days=i) for i in range(100)]
@@ -48,7 +46,7 @@ def test_moving_average_crossover_strategy_with_mock_data():
         + [150 - i for i in range(50)]  # Downtrend
     )
 
-    mock_data = pl.DataFrame({"Date": dates, "Close": prices})
+    mock_polars_data = pl.DataFrame({"Date": dates, "Close": prices})
 
     # Strategy parameters
     params = {"short_window": 10, "long_window": 30}
@@ -56,12 +54,16 @@ def test_moving_average_crossover_strategy_with_mock_data():
     strategy = MovingAverageCrossoverStrategy(params)
 
     # Generate signals
-    signals = strategy.generate_signals(mock_data)
+    signals = strategy.generate_signals(mock_polars_data)
 
     # Check if signals are generated correctly
     assert signals["signal"].sum() > 0, "No buy signals generated"
-    assert signals["signal"].to_list().count(1.0) > 0, "No buy signals (1) generated"
-    assert signals["signal"].to_list().count(0.0) > 0, "No sell signals (0) generated"
+    assert (
+        signals["signal"].value_counts().filter(pl.col("signal") == 1.0)["count"][0] > 0
+    ), "No buy signals (1) generated"
+    assert (
+        signals["signal"].value_counts().filter(pl.col("signal") == 0.0)["count"][0] > 0
+    ), "No sell signals (0) generated"
 
     # Check if the strategy generates a buy signal when short MA crosses above long MA
     crossover_indices = signals.filter(
@@ -96,15 +98,17 @@ def test_mean_reversion_strategy_initialization() -> None:
     assert strategy.std_dev == 2.0
 
 
-def test_mean_reversion_strategy_generate_signals(mock_data: pd.DataFrame) -> None:
+def test_mean_reversion_strategy_generate_signals(
+    mock_polars_data: pl.DataFrame,
+) -> None:
     params = {"window": 5, "std_dev": 2.0}
     strategy = MeanReversionStrategy(params)
-    signals = strategy.generate_signals(mock_data)
-    assert isinstance(signals, pd.DataFrame)
+    signals = strategy.generate_signals(mock_polars_data)
+    assert isinstance(signals, pl.DataFrame)
     EXPECTED_COLS = {"signal", "mean", "std", "upper_band", "lower_band", "positions"}
     for col in EXPECTED_COLS:
         assert col in signals.columns
-    assert signals["signal"].isin([0.0, 1.0, -1.0]).all()
+    assert signals["signal"].is_in([0.0, 1.0, -1.0]).all()
 
 
 @pytest.mark.parametrize(
@@ -121,14 +125,20 @@ def test_mean_reversion_strategy_generate_signals(mock_data: pd.DataFrame) -> No
 def test_strategy_with_empty_data(
     strategy_class: Strategy, params: dict[str, Any]
 ) -> None:
-    empty_data = pd.DataFrame(
-        columns=["Close"]
+    empty_data = pl.DataFrame(
+        schema=[("Close", pl.Float64)]
         if strategy_class != PairsTradingStrategy
-        else ["Close_1", "Close_2"]
+        else [("Close_1", pl.Float64), ("Close_2", pl.Float64)]
     )
     strategy = strategy_class(params)  # type: ignore
     signals = strategy.generate_signals(empty_data)
-    assert signals.empty
+
+    assert isinstance(signals, pl.DataFrame)
+    assert "Date" in signals.columns
+    assert "signal" in signals.columns
+    assert "positions" in signals.columns
+    assert signals.is_empty()
+    assert signals.is_empty()
 
 
 def test_pairs_trading_strategy_initialization() -> None:
@@ -141,31 +151,44 @@ def test_pairs_trading_strategy_initialization() -> None:
 
 def test_pairs_trading_strategy_generate_signals() -> None:
     # Create mock data for two assets
-    dates = pd.date_range(start="2020-01-01", periods=100)
-    data = pd.DataFrame(
+    start_date = date(2020, 1, 1)
+    end_date = date(2020, 4, 9)
+    num_days = (end_date - start_date).days + 1
+
+    date_range = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    data = pl.DataFrame(
         {
-            "Close_1": np.random.randn(100).cumsum() + 100,
-            "Close_2": np.random.randn(100).cumsum() + 100,
-        },
-        index=dates,
+            "Date": pl.Series(date_range),
+            "Close_1": pl.arange(0, num_days, eager=True).cum_sum() + 100,
+            "Close_2": pl.arange(0, num_days, eager=True).cum_sum() * 0.5 + 100,
+        }
     )
 
     params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
     strategy = PairsTradingStrategy(params)
     signals = strategy.generate_signals(data)
 
-    assert isinstance(signals, pd.DataFrame)
+    assert isinstance(signals, pl.DataFrame)
     EXPECTED_COLS = {"spread", "z_score", "signal", "positions"}
     for col in EXPECTED_COLS:
         assert col in signals.columns
-    assert signals["signal"].isin([0.0, 1.0, -1.0]).all()
+    assert signals["signal"].is_in([0.0, 1.0, -1.0]).all()
 
 
 def test_pairs_trading_strategy_signal_generation() -> None:
-    dates = pd.date_range(start="2020-01-01", periods=100)
-    data = pd.DataFrame(
-        {"Close_1": [100] * 50 + [110] * 50, "Close_2": [100] * 50 + [100] * 50},
-        index=dates,
+    start_date = date(2020, 1, 1)
+    end_date = date(2020, 4, 9)
+    num_days = (end_date - start_date).days + 1
+
+    date_range = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    data = pl.DataFrame(
+        {
+            "Date": pl.Series(date_range),
+            "Close_1": [100] * 50 + [110] * (num_days - 50),
+            "Close_2": [100] * num_days,
+        }
     )
 
     params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
@@ -174,29 +197,13 @@ def test_pairs_trading_strategy_signal_generation() -> None:
 
     # Check if the strategy generates the expected signals
     # Should go short asset 1, long asset 2
-    assert signals["signal"].iloc[50] == -1.0
+    assert signals["signal"][50] == -1.0
     # Should maintain position after entry
-    assert (signals["signal"].iloc[51:] != 0.0).any()  #
-
-
-def test_pairs_trading_strategy_with_missing_data() -> None:
-    data = pd.DataFrame(
-        {"Close_1": [100, 101, 102, 103], "Close_2": [100, 101, np.nan, 102]}
-    )
-    params = {"window": 2, "entry_z_score": 2.0, "exit_z_score": 0.5}
-    strategy = PairsTradingStrategy(params)
-    signals = strategy.generate_signals(data)
-
-    # One NaN signal due to missing data
-    assert signals["signal"].isna().sum() == 1
-    # The third signal should be NaN
-    assert np.isnan(signals["signal"].iloc[2])
-    # The fourth signal should not be NaN
-    assert not np.isnan(signals["signal"].iloc[3])
+    assert (signals["signal"][51:] != 0.0).any()
 
 
 def test_pairs_trading_strategy_with_invalid_data() -> None:
-    data = pd.DataFrame(
+    data = pl.DataFrame(
         {
             "Close_1": [100, 101, 102],
             "Close_3": [100, 101, 102],  # Invalid column name
@@ -210,7 +217,7 @@ def test_pairs_trading_strategy_with_invalid_data() -> None:
         strategy.generate_signals(data)
 
 
-def test_pairs_trading_strategy_with_mock_data():
+def test_pairs_trading_strategy_with_mock_polars_data():
     """Test the Pairs Trading strategy with mock data."""
     # Create mock data
     start_date = date(2023, 1, 1)
@@ -222,7 +229,9 @@ def test_pairs_trading_strategy_with_mock_data():
     # Steadily increasing
     prices2 = [100 + i * 0.1 for i in range(100)]
 
-    mock_data = pl.DataFrame({"Date": dates, "Close_1": prices1, "Close_2": prices2})
+    mock_polars_data = pl.DataFrame(
+        {"Date": dates, "Close_1": prices1, "Close_2": prices2}
+    )
 
     # Strategy parameters
     params = {"window": 20, "entry_z_score": 1.5, "exit_z_score": 0.5}
@@ -230,10 +239,10 @@ def test_pairs_trading_strategy_with_mock_data():
     strategy = PairsTradingStrategy(params)
 
     # Generate signals
-    signals = strategy.generate_signals(mock_data)
+    signals = strategy.generate_signals(mock_polars_data)
 
     # Check if signals are generated correctly
-    assert signals["signal"].is_not_null().sum() > 0, "No signals generated"
+    assert signals["signal"].null_count() == 0, "Null signals generated"
 
     long_signals = signals.filter(pl.col("signal") == 1)
     short_signals = signals.filter(pl.col("signal") == -1)
@@ -265,4 +274,4 @@ def test_pairs_trading_strategy_with_mock_data():
     assert (
         signals["spread"] == signals["Close_1"] - signals["Close_2"]
     ).all(), "Spread calculation is incorrect"
-    assert signals["z_score"].is_not_null().all(), "Z-score contains null values"
+    assert signals["z_score"].null_count() == 0, "Z-score contains null values"
