@@ -191,13 +191,10 @@ def main():
         get_user_inputs_except_strategy_params()
     )
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
-    # Get full company name(s)
-    if isinstance(ticker, tuple):
-        company_name = f"{get_full_company_name(ticker[0])} vs {get_full_company_name(ticker[1])}"
-    elif isinstance(ticker, str):
-        company_name = get_full_company_name(ticker)
-    else:
-        company_name = "Selected Companies"  # For auto-selected pairs
+
+    # Initialize company names
+    company_name1 = None
+    company_name2 = None
 
     # Prepare the trading strategy based on user inputs
     if strategy_type == "Pairs Trading" and auto_select_tickers:
@@ -206,6 +203,10 @@ def main():
                 start_date, end_date, strategy_params, optimise
             )
         )
+        # Update company names with the selected pair
+        ticker1, ticker2 = ticker_display.split(" vs. ")
+        company_name1 = get_full_company_name(ticker1)
+        company_name2 = get_full_company_name(ticker2)
     elif strategy_type == "Pairs Trading":
         data, ticker_display, strategy_params = (
             prepare_pairs_trading_strategy_without_optimisation(
@@ -216,6 +217,9 @@ def main():
                 optimise,
             )
         )
+        ticker1, ticker2 = cast(tuple[str, str], ticker)
+        company_name1 = get_full_company_name(ticker1)
+        company_name2 = get_full_company_name(ticker2)
     else:
         data, ticker_display, strategy_params = prepare_single_ticker_strategy(
             cast(str, ticker),
@@ -225,19 +229,26 @@ def main():
             strategy_params,
             optimise,
         )
+        company_name1 = get_full_company_name(ticker_display)
 
     if data is None or data.is_empty():
         st.write("No data available for the selected ticker and date range")
         return
 
+    # Create a display name for the company or companies
+    if company_name2:
+        company_display = f"{company_name1} vs. {company_name2}"
+    else:
+        company_display = company_name1
+
     # Run the backtest and display the results
     results, metrics = run_backtest(data, strategy_type, strategy_params)
-    display_performance_metrics(metrics, company_name)
-    plot_equity_curve(results, ticker_display, company_name)
-    plot_strategy_returns(results, ticker_display, company_name)
+    display_performance_metrics(metrics, company_display)
+    plot_equity_curve(results, ticker_display, company_display)
+    plot_strategy_returns(results, ticker_display, company_display)
 
     # Display the raw data from Yahoo Finance for the backtest period
-    st.header(f"Raw Data for {company_name}")
+    st.header(f"Raw Data for {company_display}")
     st.dataframe(
         data.to_pandas(),
         use_container_width=True,
