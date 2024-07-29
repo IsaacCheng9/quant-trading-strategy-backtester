@@ -138,3 +138,24 @@ def get_full_company_name(ticker: str) -> str | None:
     except Exception as e:
         logger.error(f"Failed to fetch company name for {ticker}: {e}")
         return None
+
+
+@st.cache_data
+def is_same_company(ticker1: str, ticker2: str) -> bool:
+    """
+    Determines if two tickers represent the same underlying company.
+
+    Args:
+        ticker1: The first ticker symbol.
+        ticker2: The second ticker symbol.
+
+    Returns:
+        True if the tickers likely represent the same company, False otherwise.
+    """
+    try:
+        company1 = yf.Ticker(ticker1).info.get("longName", "").lower()
+        company2 = yf.Ticker(ticker2).info.get("longName", "").lower()
+        return company1 == company2
+    except Exception as e:
+        logger.error(f"Error comparing {ticker1} and {ticker2}: {e}")
+        return False
