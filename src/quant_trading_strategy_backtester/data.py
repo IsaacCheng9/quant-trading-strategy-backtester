@@ -119,3 +119,22 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     ]
 
     return top_companies
+
+
+@st.cache_data
+def get_full_company_name(ticker: str) -> str | None:
+    """
+    Fetches the full company name for a given ticker symbol.
+
+    Args:
+        ticker: The stock ticker symbol.
+
+    Returns:
+        The full company name if available, otherwise None.
+    """
+    try:
+        company_info = yf.Ticker(ticker).info
+        return company_info.get("longName", ticker)
+    except Exception as e:
+        logger.error(f"Failed to fetch company name for {ticker}: {e}")
+        return None
