@@ -11,7 +11,10 @@ from typing import Any, cast
 import polars as pl
 import streamlit as st
 from quant_trading_strategy_backtester.backtester import Backtester
-from quant_trading_strategy_backtester.data import load_yfinance_data_two_tickers
+from quant_trading_strategy_backtester.data import (
+    is_same_company,
+    load_yfinance_data_two_tickers,
+)
 from quant_trading_strategy_backtester.strategy_templates import (
     TRADING_STRATEGIES,
     BuyAndHoldStrategy,
@@ -149,6 +152,10 @@ def optimise_pairs_trading_tickers(
     ticker_pairs = list(
         itertools.combinations([company[0] for company in top_companies], 2)
     )
+    # Filter out pairs that likely represent the same company
+    ticker_pairs = [
+        pair for pair in ticker_pairs if not is_same_company(pair[0], pair[1])
+    ]
     total_combinations = len(ticker_pairs)
     # Display progress bar and status text, as this process may take a while.
     progress_bar = st.progress(0)
