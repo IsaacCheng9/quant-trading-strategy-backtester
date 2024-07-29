@@ -3,11 +3,13 @@ Contains tests for data fetching functions.
 """
 
 import datetime
+import pytest
 
 import pandas as pd
 import polars as pl
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
+    is_same_company,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
@@ -84,3 +86,39 @@ def test_get_full_company_name_failure(monkeypatch):
 
     monkeypatch.setattr("yfinance.Ticker", mock_ticker_info_error)
     assert get_full_company_name("ERROR") is None
+
+
+def test_is_same_company_check_success(monkeypatch):
+    def mock_ticker_info(*args, **kwargs):
+        class MockTicker:
+            def __init__(self, ticker):
+                self.ticker = ticker
+
+            @property
+            def info(self):
+                if self.ticker == "GOOGL" or self.ticker == "GOOG":
+                    return {"longName": "Alphabet Inc."}
+                elif self.ticker == "AAPL":
+                    return {"longName": "Apple Inc."}
+                else:
+                    return {}
+
+        return MockTicker(args[0])
+
+    monkeypatch.setattr("yfinance.Ticker", mock_ticker_info)
+
+    # Test same company
+    assert is_same_company("GOOGL", "GOOG") is True
+    # Test different companies
+    assert is_same_company("GOOGL", "AAPL") is False
+    # Test with missing info
+    assert is_same_company("UNKNOWN1", "UNKNOWN2") is False
+
+
+def test_is_same_company_check_failure(monkeypatch):
+    # Test error handling
+    def mock_ticker_info_error(*args, **kwargs):
+        raise Exception("API Error")
+
+    monkeypatch.setattr("yfinance.Ticker", mock_ticker_info_error)
+    assert is_same_company("ERROR1", "ERROR2") is False

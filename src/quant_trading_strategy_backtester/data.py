@@ -155,7 +155,7 @@ def is_same_company(ticker1: str, ticker2: str) -> bool:
     try:
         company1 = yf.Ticker(ticker1).info.get("longName", "").lower()
         company2 = yf.Ticker(ticker2).info.get("longName", "").lower()
-        return company1 == company2
+        return company1 == company2 and company1 != "" and company2 != ""
     except Exception as e:
         logger.error(f"Error comparing {ticker1} and {ticker2}: {e}")
         return False
