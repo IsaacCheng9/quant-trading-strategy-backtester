@@ -18,6 +18,28 @@ _Try the deployed app
 - Moving Average Crossover
 - Pairs Trading
 
+## Performance Benchmark of pandas vs. Polars Implementation
+
+I originally implemented the backtester and optimiser using
+[pandas](https://pandas.pydata.org/), but I wanted to explore the performance
+benefits of using [Polars](https://pola.rs/).
+
+After refactoring the code to use Polars, I manually benchmarked the two
+implementations on my local machine (Apple M1 Max with 10 CPU cores and 32 GPU
+cores, 32 GB unified memory) and on the deployed Streamlit instance. Each run
+was a backtest from 2020/01/01 to 2023/12/31 for the pairs trading strategy,
+with ticker-pair optimisation and parameter optimisation enabled.
+
+**Polars had an average speed-up of over 110% compared to pandas on my local**
+**machine, and over 80% on the Streamlit instance.**
+
+![M1 Max Benchmark Results](./resources/m1_max_benchmark_results.png)
+
+![Streamlit Benchmark Results](./resources/streamlit_benchmark_results.png)
+
+The full benchmark results can be found in the CSV files in the
+[resources folder](./resources).
+
 ## Usage
 
 ### Installing Dependencies
