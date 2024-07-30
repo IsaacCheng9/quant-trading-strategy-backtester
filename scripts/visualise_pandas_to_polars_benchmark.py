@@ -4,8 +4,8 @@ implementation and the Polars implementation of the quant trading strategy
 backtester.
 """
 
-import plotly.graph_objects as go
 import numpy as np
+import plotly.graph_objects as go
 import polars as pl
 
 
@@ -44,6 +44,7 @@ def visualise_benchmark_times(
     # Read and process execution times from CSV files
     pandas_times, pandas_mean, pandas_std = load_and_process_benchmark_data(pandas_csv)
     polars_times, polars_mean, polars_std = load_and_process_benchmark_data(polars_csv)
+
     # Ensure that the number of runs is equal for fairness
     assert len(pandas_times) == len(
         polars_times
@@ -73,26 +74,23 @@ def visualise_benchmark_times(
             ),
         ]
     )
-    # Change the bar mode
+    # Change the bar mode and update layout
     fig.update_layout(
         barmode="group",
-        title=(
-            "pandas vs Polars: Pairs Trading with Ticker-Pair and Parameter "
-            "Optimisation – Execution Time"
+        title=dict(
+            text=(
+                f"pandas vs. Polars: Pairs Trading with Ticker-Pair and Parameter "
+                f"Optimisation – Execution Time ({benchmark_platform})<br>"
+                f"<sub>Average Speed-Up: {avg_speedup:.3f}%</sub>"
+            ),
+            font=dict(size=20),
+            y=0.95,
+            x=0.5,
+            xanchor="center",
+            yanchor="top",
         ),
         xaxis_title="Run Number",
         yaxis_title="Execution Time (seconds)",
-        annotations=[
-            dict(
-                x=0.5,
-                y=1.05,
-                xref="paper",
-                yref="paper",
-                text=f"Average Speedup: {avg_speedup:.3f}%",
-                showarrow=False,
-                font=dict(size=14),
-            )
-        ],
     )
     # Add value labels on top of each bar
     for i in range(num_runs):
@@ -126,18 +124,19 @@ def visualise_benchmark_times(
     )
 
     # Save the plot as an interactive HTML file
-    fig.write_html(f"resources/{benchmark_platform}_benchmark_results.html")
+    platform_prefix = benchmark_platform.lower().replace(" ", "_")
+    fig.write_html(f"resources/{platform_prefix}_benchmark_results.html")
     # Show the plot (if running in an environment that supports it)
     fig.show()
 
 
 if __name__ == "__main__":
     PANDAS_AND_POLARS_BENCHMARKS = {
-        "m1_max": [
+        "M1 Max": [
             "resources/m1_max_pandas_pairs_trading_with_optimisers.csv",
             "resources/m1_max_polars_pairs_trading_with_optimisers.csv",
         ],
-        "streamlit": [
+        "Streamlit": [
             "resources/streamlit_pandas_pairs_trading_with_optimisers.csv",
             "resources/streamlit_polars_pairs_trading_with_optimisers.csv",
         ],
