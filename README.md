@@ -30,7 +30,7 @@ cores, 32 GB unified memory) and on the deployed Streamlit instance. Each run
 was a backtest from 2020/01/01 to 2023/12/31 for the pairs trading strategy,
 with ticker-pair optimisation and parameter optimisation enabled.
 
-**Polars had an average speed-up of over 110%\* compared to pandas on my local**
+**Polars had an average speed-up of over 110% compared to pandas on my local**
 **machine, and over 80% on the Streamlit instance.**
 
 ![M1 Max Benchmark Results](./resources/m1_max_benchmark_results.png)
