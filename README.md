@@ -28,7 +28,8 @@ After refactoring the code to use Polars, I manually benchmarked the two
 implementations on my local machine (Apple M1 Max with 10 CPU cores and 32 GPU
 cores, 32 GB unified memory) and on the deployed Streamlit instance. Each run
 was a backtest from 2020/01/01 to 2023/12/31 for the pairs trading strategy,
-with ticker-pair optimisation and parameter optimisation enabled.
+with ticker-pair optimisation amongst the top 20 S&P 500 stocks and parameter
+optimisation enabled.
 
 **Polars had an average speed-up of over 110% compared to pandas on my local**
 **machine, and over 80% on the Streamlit instance.**
