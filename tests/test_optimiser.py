@@ -8,13 +8,151 @@ from typing import Any
 import polars as pl
 import pytest
 from quant_trading_strategy_backtester.app import (
+    prepare_buy_and_hold_strategy_with_optimisation,
     prepare_pairs_trading_strategy_with_optimisation,
 )
 from quant_trading_strategy_backtester.optimiser import (
     optimise_pairs_trading_tickers,
     run_backtest,
     run_optimisation,
+    optimise_buy_and_hold_ticker,
 )
+
+
+def test_optimise_buy_and_hold_ticker(monkeypatch):
+    # Mock data and functions
+    mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
+    mock_polars_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 32)],
+            "Close": [100 + i for i in range(31)],
+        }
+    )
+
+    def mock_load_data(*args, **kwargs):
+        return mock_polars_data
+
+    def mock_run_backtest(*args, **kwargs):
+        return None, {"Total Return": 0.3, "Sharpe Ratio": 1.5, "Max Drawdown": -0.1}
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.data.load_yfinance_data_one_ticker",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    start_date = datetime.date(2020, 1, 1)
+    end_date = datetime.date(2020, 12, 31)
+
+    best_ticker, params, metrics = optimise_buy_and_hold_ticker(
+        mock_top_companies, start_date, end_date
+    )
+
+    assert isinstance(best_ticker, str)
+    assert best_ticker in [company[0] for company in mock_top_companies]
+    assert isinstance(params, dict)
+    assert len(params) == 0  # Buy and Hold has no parameters
+    assert isinstance(metrics, dict)
+    assert "Total Return" in metrics
+    assert "Sharpe Ratio" in metrics
+    assert "Max Drawdown" in metrics
+
+
+def test_run_optimisation_buy_and_hold(monkeypatch):
+    # Mock data and functions
+    mock_polars_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 32)],
+            "Close": [100 + i for i in range(31)],
+        }
+    )
+    mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
+
+    def mock_get_top_companies(*args, **kwargs):
+        return mock_top_companies
+
+    def mock_optimise_buy_and_hold(*args, **kwargs):
+        return (
+            "AAPL",
+            {},
+            {"Total Return": 0.3, "Sharpe Ratio": 1.5, "Max Drawdown": -0.1},
+        )
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.get_top_sp500_companies",
+        mock_get_top_companies,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.optimise_buy_and_hold_ticker",
+        mock_optimise_buy_and_hold,
+    )
+
+    strategy_type = "Buy and Hold"
+    initial_params = {}  # Buy and Hold has no parameters
+    start_date = datetime.date(2020, 1, 1)
+    end_date = datetime.date(2020, 12, 31)
+
+    optimised_params, metrics = run_optimisation(
+        mock_polars_data, strategy_type, initial_params, start_date, end_date
+    )
+
+    assert isinstance(optimised_params, dict)
+    assert len(optimised_params) == 0  # Buy and Hold has no parameters
+    assert isinstance(metrics, dict)
+    assert "Total Return" in metrics
+    assert "Sharpe Ratio" in metrics
+    assert "Max Drawdown" in metrics
+
+
+def test_prepare_buy_and_hold_strategy_with_optimisation(monkeypatch):
+    # Mock data and functions
+    mock_polars_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 32)],
+            "Close": [100 + i for i in range(31)],
+        }
+    )
+    mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
+
+    def mock_get_top_companies(*args, **kwargs):
+        return mock_top_companies
+
+    def mock_optimise_buy_and_hold(*args, **kwargs):
+        return (
+            "AAPL",
+            {},
+            {"Total Return": 0.3, "Sharpe Ratio": 1.5, "Max Drawdown": -0.1},
+        )
+
+    def mock_load_data(*args, **kwargs):
+        return mock_polars_data
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_top_sp500_companies",
+        mock_get_top_companies,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.optimise_buy_and_hold_ticker",
+        mock_optimise_buy_and_hold,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
+        mock_load_data,
+    )
+
+    start_date = datetime.date(2020, 1, 1)
+    end_date = datetime.date(2020, 12, 31)
+    data, ticker_display, strategy_params = (
+        prepare_buy_and_hold_strategy_with_optimisation(start_date, end_date)
+    )
+
+    assert isinstance(data, pl.DataFrame)
+    assert isinstance(ticker_display, str)
+    assert ticker_display == "AAPL"
+    assert isinstance(strategy_params, dict)
+    assert len(strategy_params) == 0  # Buy and Hold has no parameters
 
 
 def test_optimise_pairs_trading_tickers(monkeypatch):
@@ -50,7 +188,6 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
     start_date = datetime.date(2020, 1, 1)
     end_date = datetime.date(2020, 12, 31)
     strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
-
     # Test with optimisation
     best_pair, best_params, _ = optimise_pairs_trading_tickers(
         mock_top_companies, start_date, end_date, strategy_params, True
@@ -76,9 +213,8 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         ticker in [company[0] for company in mock_top_companies] for ticker in best_pair
     )
     assert isinstance(best_params, dict)
-    assert (
-        best_params == strategy_params
-    )  # Should be the same as input when not optimising
+    # Should be the same as input when not optimising
+    assert best_params == strategy_params
 
 
 def test_handle_pairs_trading_optimization(monkeypatch):
