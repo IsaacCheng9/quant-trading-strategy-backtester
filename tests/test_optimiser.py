@@ -144,9 +144,11 @@ def test_run_optimisation(monkeypatch):
 
     strategy_type = "Mean Reversion"
     initial_params = {"window": 20, "std_dev": 2.0}
+    start_date = datetime.date(2020, 1, 1)
+    end_date = datetime.date(2020, 12, 31)
 
     optimised_params, metrics = run_optimisation(
-        mock_polars_data, strategy_type, initial_params
+        mock_polars_data, strategy_type, initial_params, start_date, end_date
     )
 
     assert isinstance(optimised_params, dict)
