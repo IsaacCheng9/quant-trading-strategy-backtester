@@ -22,6 +22,7 @@ from quant_trading_strategy_backtester.data import (
     load_yfinance_data_two_tickers,
 )
 from quant_trading_strategy_backtester.optimiser import (
+    optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     run_backtest,
     run_optimisation,
@@ -38,6 +39,56 @@ from quant_trading_strategy_backtester.visualisation import (
 )
 
 # Trading strategy preparation functions
+
+
+def prepare_buy_and_hold_strategy_with_optimisation(
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> tuple[pl.DataFrame, str, dict[str, Any]]:
+    """
+    Handles the optimisation process for Buy and Hold strategy.
+
+    Selects the best ticker from the top S&P 500 companies.
+
+    Args:
+        start_date: The start date for historical data.
+        end_date: The end date for historical data.
+
+    Returns:
+        A tuple containing:
+            - Historical data for the selected ticker.
+            - The selected ticker symbol.
+            - An empty dictionary (no strategy parameters for Buy and Hold).
+    """
+    st.info(
+        f"Selecting the best ticker from the top {NUM_TOP_COMPANIES} S&P 500 "
+        "companies. This may take a while..."
+    )
+
+    start_time = time.time()
+
+    # Fetch the top S&P 500 companies
+    with st.spinner("Fetching top S&P 500 companies..."):
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
+
+    # Optimise ticker selection
+    best_ticker, _, _ = optimise_buy_and_hold_ticker(
+        top_companies, start_date, end_date
+    )
+
+    # Calculate and display the time taken for optimisation
+    end_time = time.time()
+    duration = end_time - start_time
+    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
+
+    # Display the optimal ticker
+    st.header("Optimal Ticker")
+    st.write(f"Best performing ticker: {best_ticker}")
+
+    # Load historical data for the selected ticker
+    data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
+
+    return data, best_ticker, {}
 
 
 def prepare_pairs_trading_strategy_with_optimisation(
@@ -134,7 +185,9 @@ def prepare_pairs_trading_strategy_without_optimisation(
     ticker_display = f"{ticker1} vs. {ticker2}"
 
     if optimise:
-        strategy_params, _ = run_optimisation(data, "Pairs Trading", strategy_params)
+        strategy_params, _ = run_optimisation(
+            data, "Pairs Trading", strategy_params, start_date, end_date
+        )
 
     return data, ticker_display, strategy_params
 
@@ -172,7 +225,17 @@ def prepare_single_ticker_strategy(
     ticker_display = ticker
 
     if optimise and strategy_type != "Buy and Hold":
-        strategy_params, _ = run_optimisation(data, strategy_type, strategy_params)
+        strategy_params, _ = run_optimisation(
+            data, strategy_type, strategy_params, start_date, end_date
+        )
+    elif optimise and strategy_type == "Buy and Hold":
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)  # Adjust the number as needed
+        best_ticker, strategy_params, _ = optimise_buy_and_hold_ticker(
+            top_companies, start_date, end_date
+        )
+        ticker = best_ticker
+        ticker_display = best_ticker
+        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
 
     return data, ticker_display, strategy_params
 
@@ -220,6 +283,11 @@ def main():
         ticker1, ticker2 = cast(tuple[str, str], ticker)
         company_name1 = get_full_company_name(ticker1)
         company_name2 = get_full_company_name(ticker2)
+    elif strategy_type == "Buy and Hold" and auto_select_tickers:
+        data, ticker_display, strategy_params = (
+            prepare_buy_and_hold_strategy_with_optimisation(start_date, end_date)
+        )
+        company_name1 = get_full_company_name(ticker_display)
     else:
         data, ticker_display, strategy_params = prepare_single_ticker_strategy(
             cast(str, ticker),

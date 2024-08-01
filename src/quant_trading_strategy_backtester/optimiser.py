@@ -12,7 +12,9 @@ import polars as pl
 import streamlit as st
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.data import (
+    get_top_sp500_companies,
     is_same_company,
+    load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
 from quant_trading_strategy_backtester.strategy_templates import (
@@ -23,47 +25,108 @@ from quant_trading_strategy_backtester.strategy_templates import (
     PairsTradingStrategy,
     Strategy,
 )
+from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES
 
 
 def run_optimisation(
-    data: pl.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    start_date: datetime.date,
+    end_date: datetime.date,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """
-    Runs the optimisation process for strategy parameters.
-
-    Optimises the strategy parameters based on the historical data and strategy
-    type.
+    Runs the optimisation process for strategy parameters or ticker selection.
 
     Args:
         data: Historical price data.
         strategy_type: The type of strategy being optimised.
         strategy_params: Initial strategy parameters or parameter ranges.
+        start_date: Start date for historical data.
+        end_date: End date for historical data.
 
     Returns:
         A tuple containing:
-            - Optimised strategy parameters.
+            - Optimised strategy parameters or selected ticker.
             - Performance metrics for the optimised strategy.
     """
-    st.info("Optimising parameters. This may take a while...")
+    st.info("Optimising strategy. This may take a while...")
     start_time = time.time()
 
-    # Run the optimisation process
-    strategy_params, metrics = optimise_strategy_params(
-        data,
-        strategy_type,
-        cast(dict[str, range] | dict[str, list[float]], strategy_params),
-    )
+    if strategy_type == "Buy and Hold":
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
+        best_ticker, strategy_params, metrics = optimise_buy_and_hold_ticker(
+            top_companies, start_date, end_date
+        )
+        st.success(f"Best ticker for Buy and Hold: {best_ticker}")
+    else:
+        strategy_params, metrics = optimise_strategy_params(
+            data,
+            strategy_type,
+            cast(dict[str, range] | dict[str, list[float]], strategy_params),
+        )
 
-    # Calculate and display the time taken for optimisation
     end_time = time.time()
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
 
-    # Display the optimal parameters
     st.header("Optimal Parameters")
     st.write(strategy_params)
 
     return strategy_params, metrics
+
+
+def optimise_buy_and_hold_ticker(
+    top_companies: list[tuple[str, float]],
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> tuple[str, dict[str, Any], dict[str, float]]:
+    """
+    Optimises ticker selection for the Buy and Hold strategy.
+
+    Args:
+        top_companies: List of tuples containing ticker symbols and market caps
+                       of top companies.
+        start_date: Start date for historical data.
+        end_date: End date for historical data.
+
+    Returns:
+        A tuple containing the best ticker, strategy parameters, and
+        performance metrics.
+    """
+    best_ticker = None
+    best_metrics = None
+    best_total_return = float("-inf")
+
+    total_tickers = len(top_companies)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for i, (ticker, _) in enumerate(top_companies):
+        status_text.text(f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}")
+        progress_bar.progress((i + 1) / total_tickers)
+
+        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+        if data is None or data.is_empty():
+            continue
+
+        strategy = BuyAndHoldStrategy({})
+        backtester = Backtester(data, strategy)
+        backtester.run()
+        metrics = backtester.get_performance_metrics()
+
+        if metrics and metrics["Total Return"] > best_total_return:
+            best_total_return = metrics["Total Return"]
+            best_ticker = ticker
+            best_metrics = metrics
+
+    progress_bar.empty()
+    status_text.empty()
+
+    if not best_ticker or not best_metrics:
+        raise ValueError("Buy and Hold optimization failed")
+
+    return best_ticker, {}, best_metrics
 
 
 def optimise_strategy_params(
