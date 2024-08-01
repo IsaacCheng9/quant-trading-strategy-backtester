@@ -12,10 +12,10 @@ from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
 )
 from quant_trading_strategy_backtester.optimiser import (
+    optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     run_backtest,
     run_optimisation,
-    optimise_buy_and_hold_ticker,
 )
 
 
