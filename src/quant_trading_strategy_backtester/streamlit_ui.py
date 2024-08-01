@@ -20,7 +20,7 @@ def get_user_inputs_except_strategy_params() -> (
     Returns:
         A tuple containing the ticker symbol(s), start date, end date, strategy
         type, and a boolean indicating whether to use automatic ticker
-        selection for pairs trading.
+        selection for pairs trading or buy and hold.
     """
     strategy_type = cast(
         str, st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
@@ -41,6 +41,14 @@ def get_user_inputs_except_strategy_params() -> (
                 "Ticker Symbol 2", value="GOOGL"
             ).upper()
             ticker = (ticker1, ticker2)
+    elif strategy_type == "Buy and Hold":
+        auto_select_tickers = st.sidebar.checkbox(
+            f"Optimise Ticker From Top {NUM_TOP_COMPANIES} S&P 500 Companies"
+        )
+        if auto_select_tickers:
+            ticker = None  # We'll select the ticker later
+        else:
+            ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
     else:
         ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
 
