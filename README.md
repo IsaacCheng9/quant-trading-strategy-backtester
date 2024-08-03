@@ -18,6 +18,17 @@ _Try the deployed app
 - Moving Average Crossover
 - Pairs Trading
 
+## Key Features
+
+- Interactive web-based dashboard using Streamlit
+- Efficient data processing using Polars for improved performance
+- Support for multiple trading strategies with customisable parameters
+- Real-time data fetching from Yahoo Finance
+- Automatic optimisation of strategy parameters and stock selection from S&P 500
+- Visualisation of equity curves and strategy returns
+- Performance metrics including Total Return, Sharpe Ratio, and Max Drawdown
+- Monthly performance table with rolling returns
+
 ## Performance Benchmark of pandas vs. Polars Implementation
 
 I originally implemented the backtester and optimiser using

@@ -66,13 +66,75 @@ def plot_strategy_returns(
     fig = go.Figure(
         data=go.Scatter(
             x=results["Date"].to_list(),
-            y=results["strategy_returns"].to_list(),
+            y=(results["strategy_returns"] * 100).to_list(),  # Convert to percentage
             mode="lines",
         )
     )
     fig.update_layout(
         title=f"{company_name} ({ticker_display}) Strategy Daily Returns",
         xaxis_title="Date",
-        yaxis_title="Returns",
+        yaxis_title="Returns (%)",
+        yaxis_tickformat=".2f",  # Format y-axis ticks to 2 decimal places
     )
     st.plotly_chart(fig)
+
+
+def display_returns_by_month(results: pl.DataFrame) -> None:
+    """
+    Displays a table showing returns data for each month in the backtest,
+    including monthly returns and rolling (cumulative) returns.
+
+    Args:
+        results: The backtest results DataFrame.
+    """
+    st.subheader("Returns by Month")
+    if results.is_empty():
+        st.write("No data available for monthly performance calculation.")
+        return
+
+    monthly_returns = (
+        results.with_columns(
+            pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)")
+        )
+        .group_by("Month (YYYY-MM)")
+        .agg(
+            [
+                pl.col("equity_curve").first().alias("start_value"),
+                pl.col("equity_curve").last().alias("end_value"),
+            ]
+        )
+        .with_columns(
+            (
+                (pl.col("end_value") - pl.col("start_value"))
+                / pl.col("start_value")
+                * 100
+            ).alias("Monthly Return (%)")
+        )
+        .sort("Month (YYYY-MM)")
+    )
+
+    if monthly_returns.is_empty():
+        st.write("No monthly data available after aggregation.")
+    else:
+        initial_start_value = monthly_returns["start_value"][0]
+        # Calculate rolling returns
+        monthly_returns = monthly_returns.with_columns(
+            ((pl.col("end_value") / initial_start_value - 1) * 100).alias(
+                "Rolling Return (%)"
+            )
+        )
+        # Round the percentage columns
+        monthly_returns = monthly_returns.with_columns(
+            [
+                pl.col("Monthly Return (%)").round(2),
+                pl.col("Rolling Return (%)").round(2),
+            ]
+        )
+        # Display the table
+        st.dataframe(
+            monthly_returns.select(
+                ["Month (YYYY-MM)", "Monthly Return (%)", "Rolling Return (%)"]
+            ).to_pandas(),
+            use_container_width=False,
+            hide_index=True,
+        )

@@ -22,7 +22,7 @@ class Backtester:
         data: Historical price data.
         strategy: The trading strategy to backtest.
         initial_capital: The initial capital for the backtest.
-        results: The results of the backtest (initialized after running).
+        results: The results of the backtest (initialised after running).
     """
 
     def __init__(

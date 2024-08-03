@@ -31,8 +31,12 @@ from quant_trading_strategy_backtester.streamlit_ui import (
     get_user_inputs_except_strategy_params,
     get_user_inputs_for_strategy_params,
 )
-from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES
+from quant_trading_strategy_backtester.utils import (
+    NUM_TOP_COMPANIES_ONE_TICKER,
+    NUM_TOP_COMPANIES_TWO_TICKERS,
+)
 from quant_trading_strategy_backtester.visualisation import (
+    display_returns_by_month,
     display_performance_metrics,
     plot_equity_curve,
     plot_strategy_returns,
@@ -61,7 +65,7 @@ def prepare_buy_and_hold_strategy_with_optimisation(
             - An empty dictionary (no strategy parameters for Buy and Hold).
     """
     st.info(
-        f"Selecting the best ticker from the top {NUM_TOP_COMPANIES} S&P 500 "
+        f"Selecting the best ticker from the top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
         "companies. This may take a while..."
     )
 
@@ -69,7 +73,7 @@ def prepare_buy_and_hold_strategy_with_optimisation(
 
     # Fetch the top S&P 500 companies
     with st.spinner("Fetching top S&P 500 companies..."):
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
 
     # Optimise ticker selection
     best_ticker, _, _ = optimise_buy_and_hold_ticker(
@@ -117,7 +121,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     """
     # Inform the user that the optimisation process is starting
     st.info(
-        f"Selecting the best pair from the top {NUM_TOP_COMPANIES} S&P 500 "
+        f"Selecting the best pair from the top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
         "companies. This may take a while..."
     )
 
@@ -125,7 +129,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
 
     # Fetch the top S&P 500 companies
     with st.spinner("Fetching top S&P 500 companies..."):
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_TWO_TICKERS)
 
     # Optimise ticker pair selection and strategy parameters
     ticker, strategy_params, _ = optimise_pairs_trading_tickers(
@@ -229,7 +233,7 @@ def prepare_single_ticker_strategy(
             data, strategy_type, strategy_params, start_date, end_date
         )
     elif optimise and strategy_type == "Buy and Hold":
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)  # Adjust the number as needed
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
         best_ticker, strategy_params, _ = optimise_buy_and_hold_ticker(
             top_companies, start_date, end_date
         )
@@ -255,7 +259,7 @@ def main():
     )
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
 
-    # Initialize company names
+    # Initialise company names
     company_name1 = None
     company_name2 = None
 
@@ -314,6 +318,7 @@ def main():
     display_performance_metrics(metrics, company_display)
     plot_equity_curve(results, ticker_display, company_display)
     plot_strategy_returns(results, ticker_display, company_display)
+    display_returns_by_month(results)
 
     # Display the raw data from Yahoo Finance for the backtest period
     st.header(f"Raw Data for {company_display}")
