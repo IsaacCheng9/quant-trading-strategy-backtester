@@ -217,7 +217,7 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
     assert best_params == strategy_params
 
 
-def test_handle_pairs_trading_optimization(monkeypatch):
+def test_handle_pairs_trading_optimisation(monkeypatch):
     # Mock data and functions
     mock_polars_data = pl.DataFrame(
         {"Close_1": [100, 101, 102], "Close_2": [200, 202, 204]}

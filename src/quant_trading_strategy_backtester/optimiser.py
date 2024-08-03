@@ -124,7 +124,7 @@ def optimise_buy_and_hold_ticker(
     status_text.empty()
 
     if not best_ticker or not best_metrics:
-        raise ValueError("Buy and Hold optimization failed")
+        raise ValueError("Buy and Hold optimisation failed")
 
     return best_ticker, {}, best_metrics
 

@@ -255,7 +255,7 @@ def main():
     )
     optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
 
-    # Initialize company names
+    # Initialise company names
     company_name1 = None
     company_name2 = None
 

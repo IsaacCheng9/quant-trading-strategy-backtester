@@ -271,7 +271,7 @@ class PairsTradingStrategy(Strategy):
             A DataFrame containing the generated trading signals.
             Columns include:
             - 'spread': The price difference between the two assets.
-            - 'z_score': The standardized score of the spread.
+            - 'z_score': The standardised score of the spread.
             - 'signal': The trading signal (-1, 0, or 1).
             - 'positions': The change in position from the previous period.
         """
