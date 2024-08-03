@@ -66,13 +66,56 @@ def plot_strategy_returns(
     fig = go.Figure(
         data=go.Scatter(
             x=results["Date"].to_list(),
-            y=results["strategy_returns"].to_list(),
+            y=(results["strategy_returns"] * 100).to_list(),  # Convert to percentage
             mode="lines",
         )
     )
     fig.update_layout(
         title=f"{company_name} ({ticker_display}) Strategy Daily Returns",
         xaxis_title="Date",
-        yaxis_title="Returns",
+        yaxis_title="Returns (%)",
+        yaxis_tickformat=".2f",  # Format y-axis ticks to 2 decimal places
     )
     st.plotly_chart(fig)
+
+
+def display_monthly_performance_table(results: pl.DataFrame) -> None:
+    """
+    Displays a table showing performance data for each month in the backtest.
+
+    Args:
+        results: The backtest results DataFrame.
+    """
+    monthly_returns = (
+        results.with_columns(
+            pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)")
+        )
+        .group_by("Month (YYYY-MM)")
+        .agg(
+            [
+                pl.col("equity_curve").first().alias("start_value"),
+                pl.col("equity_curve").last().alias("end_value"),
+            ]
+        )
+        .with_columns(
+            [
+                (
+                    (pl.col("end_value") - pl.col("start_value"))
+                    / pl.col("start_value")
+                    * 100
+                ).alias("Monthly Return (%)"),
+            ]
+        )
+        .sort("Month (YYYY-MM)")
+    )
+
+    # Display the table
+    st.subheader("Monthly Performance")
+    st.write(
+        "This table shows the return for each individual month, not rolling returns."
+    )
+    st.dataframe(
+        monthly_returns.select(["Month (YYYY-MM)", "Monthly Return (%)"]).to_pandas(),
+        use_container_width=True,
+        hide_index=True,
+    )

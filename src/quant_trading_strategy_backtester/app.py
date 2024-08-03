@@ -33,6 +33,7 @@ from quant_trading_strategy_backtester.streamlit_ui import (
 )
 from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES
 from quant_trading_strategy_backtester.visualisation import (
+    display_monthly_performance_table,
     display_performance_metrics,
     plot_equity_curve,
     plot_strategy_returns,
@@ -229,7 +230,7 @@ def prepare_single_ticker_strategy(
             data, strategy_type, strategy_params, start_date, end_date
         )
     elif optimise and strategy_type == "Buy and Hold":
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)  # Adjust the number as needed
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
         best_ticker, strategy_params, _ = optimise_buy_and_hold_ticker(
             top_companies, start_date, end_date
         )
@@ -314,6 +315,7 @@ def main():
     display_performance_metrics(metrics, company_display)
     plot_equity_curve(results, ticker_display, company_display)
     plot_strategy_returns(results, ticker_display, company_display)
+    display_monthly_performance_table(results)
 
     # Display the raw data from Yahoo Finance for the backtest period
     st.header(f"Raw Data for {company_display}")
