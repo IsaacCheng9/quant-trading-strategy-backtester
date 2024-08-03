@@ -25,7 +25,7 @@ from quant_trading_strategy_backtester.strategy_templates import (
     PairsTradingStrategy,
     Strategy,
 )
-from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER, NUM_TOP_COMPANIES_TWO_TICKERS
+from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
 
 
 def run_optimisation(
