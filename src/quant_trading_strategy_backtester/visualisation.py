@@ -86,6 +86,11 @@ def display_monthly_performance_table(results: pl.DataFrame) -> None:
     Args:
         results: The backtest results DataFrame.
     """
+    st.subheader("Monthly Performance")
+    if results.is_empty():
+        st.write("No data available for monthly performance calculation.")
+        return
+
     monthly_returns = (
         results.with_columns(
             pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)")
@@ -109,13 +114,13 @@ def display_monthly_performance_table(results: pl.DataFrame) -> None:
         .sort("Month (YYYY-MM)")
     )
 
-    # Display the table
-    st.subheader("Monthly Performance")
-    st.write(
-        "This table shows the return for each individual month, not rolling returns."
-    )
-    st.dataframe(
-        monthly_returns.select(["Month (YYYY-MM)", "Monthly Return (%)"]).to_pandas(),
-        use_container_width=True,
-        hide_index=True,
-    )
+    if monthly_returns.is_empty():
+        st.write("No monthly data available after aggregation.")
+    else:
+        st.dataframe(
+            monthly_returns.select(
+                ["Month (YYYY-MM)", "Monthly Return (%)"]
+            ).to_pandas(),
+            use_container_width=True,
+            hide_index=True,
+        )
