@@ -79,14 +79,15 @@ def plot_strategy_returns(
     st.plotly_chart(fig)
 
 
-def display_monthly_performance_table(results: pl.DataFrame) -> None:
+def display_returns_by_month(results: pl.DataFrame) -> None:
     """
-    Displays a table showing performance data for each month in the backtest.
+    Displays a table showing returns data for each month in the backtest,
+    including monthly returns and rolling (cumulative) returns.
 
     Args:
         results: The backtest results DataFrame.
     """
-    st.subheader("Monthly Performance")
+    st.subheader("Returns by Month")
     if results.is_empty():
         st.write("No data available for monthly performance calculation.")
         return
@@ -103,13 +104,11 @@ def display_monthly_performance_table(results: pl.DataFrame) -> None:
             ]
         )
         .with_columns(
-            [
-                (
-                    (pl.col("end_value") - pl.col("start_value"))
-                    / pl.col("start_value")
-                    * 100
-                ).alias("Monthly Return (%)"),
-            ]
+            (
+                (pl.col("end_value") - pl.col("start_value"))
+                / pl.col("start_value")
+                * 100
+            ).alias("Monthly Return (%)")
         )
         .sort("Month (YYYY-MM)")
     )
@@ -117,10 +116,25 @@ def display_monthly_performance_table(results: pl.DataFrame) -> None:
     if monthly_returns.is_empty():
         st.write("No monthly data available after aggregation.")
     else:
+        initial_start_value = monthly_returns["start_value"][0]
+        # Calculate rolling returns
+        monthly_returns = monthly_returns.with_columns(
+            ((pl.col("end_value") / initial_start_value - 1) * 100).alias(
+                "Rolling Return (%)"
+            )
+        )
+        # Round the percentage columns
+        monthly_returns = monthly_returns.with_columns(
+            [
+                pl.col("Monthly Return (%)").round(2),
+                pl.col("Rolling Return (%)").round(2),
+            ]
+        )
+        # Display the table
         st.dataframe(
             monthly_returns.select(
-                ["Month (YYYY-MM)", "Monthly Return (%)"]
+                ["Month (YYYY-MM)", "Monthly Return (%)", "Rolling Return (%)"]
             ).to_pandas(),
-            use_container_width=True,
+            use_container_width=False,
             hide_index=True,
         )
