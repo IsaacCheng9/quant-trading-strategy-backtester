@@ -25,7 +25,7 @@ from quant_trading_strategy_backtester.strategy_templates import (
     PairsTradingStrategy,
     Strategy,
 )
-from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES
+from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER, NUM_TOP_COMPANIES_TWO_TICKERS
 
 
 def run_optimisation(
@@ -54,7 +54,7 @@ def run_optimisation(
     start_time = time.time()
 
     if strategy_type == "Buy and Hold":
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES)
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
         best_ticker, strategy_params, metrics = optimise_buy_and_hold_ticker(
             top_companies, start_date, end_date
         )
