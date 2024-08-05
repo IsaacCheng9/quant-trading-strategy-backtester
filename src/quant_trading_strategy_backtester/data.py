@@ -114,9 +114,10 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
                 sp500_companies.append((ticker, market_cap))
 
     # Sort companies by market cap (descending) and take the top X companies.
-    top_companies = sorted(sp500_companies, key=lambda x: x[1], reverse=True)[
-        :num_companies
-    ]
+    sorted_companies = sorted(sp500_companies, key=lambda x: x[1], reverse=True)
+    top_companies = (
+        sorted_companies[:num_companies] if num_companies > 0 else sorted_companies
+    )
 
     return top_companies
 

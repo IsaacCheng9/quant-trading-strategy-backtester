@@ -8,7 +8,10 @@ from typing import Any, cast
 
 import streamlit as st
 from quant_trading_strategy_backtester.strategy_templates import TRADING_STRATEGIES
-from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER, NUM_TOP_COMPANIES_TWO_TICKERS
+from quant_trading_strategy_backtester.utils import (
+    NUM_TOP_COMPANIES_ONE_TICKER,
+    NUM_TOP_COMPANIES_TWO_TICKERS,
+)
 
 
 def get_user_inputs_except_strategy_params() -> (
@@ -27,9 +30,11 @@ def get_user_inputs_except_strategy_params() -> (
     )
 
     auto_select_tickers = False
+    # Two ticker strategies
     if strategy_type == "Pairs Trading":
         auto_select_tickers = st.sidebar.checkbox(
-            f"Optimise Ticker Pair From Top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 Companies"
+            f"Optimise Ticker Pair From Top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
+            "Companies"
         )
         if auto_select_tickers:
             ticker = None  # We'll select tickers later
@@ -41,7 +46,12 @@ def get_user_inputs_except_strategy_params() -> (
                 "Ticker Symbol 2", value="GOOGL"
             ).upper()
             ticker = (ticker1, ticker2)
-    elif strategy_type == "Buy and Hold":
+    # One ticker strategies
+    elif strategy_type in [
+        "Buy and Hold",
+        "Mean Reversion",
+        "Moving Average Crossover",
+    ]:
         auto_select_tickers = st.sidebar.checkbox(
             f"Optimise Ticker From Top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 Companies"
         )

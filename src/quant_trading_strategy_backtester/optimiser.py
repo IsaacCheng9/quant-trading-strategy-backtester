@@ -129,6 +129,63 @@ def optimise_buy_and_hold_ticker(
     return best_ticker, {}, best_metrics
 
 
+def optimise_single_ticker_strategy_ticker(
+    top_companies: list[tuple[str, float]],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+) -> str:
+    """
+    Optimises ticker selection for single ticker strategies.
+
+    Args:
+        top_companies: List of tuples containing ticker symbols and market caps
+                       of top companies.
+        start_date: Start date for historical data.
+        end_date: End date for historical data.
+        strategy_type: The type of strategy being used.
+        strategy_params: Strategy parameters.
+
+    Returns:
+        The best ticker.
+    """
+    best_ticker = None
+    best_sharpe_ratio = float("-inf")
+
+    total_tickers = len(top_companies)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    # Use fixed parameter values for ticker evaluation
+    fixed_params = {
+        k: v[0] if isinstance(v, (list, range)) else v
+        for k, v in strategy_params.items()
+    }
+
+    for i, (ticker, _) in enumerate(top_companies):
+        status_text.text(f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}")
+        progress_bar.progress((i + 1) / total_tickers)
+
+        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+        if data is None or data.is_empty():
+            continue
+
+        _, current_metrics = run_backtest(data, strategy_type, fixed_params)
+
+        if current_metrics["Sharpe Ratio"] > best_sharpe_ratio:
+            best_sharpe_ratio = current_metrics["Sharpe Ratio"]
+            best_ticker = ticker
+
+    progress_bar.empty()
+    status_text.empty()
+
+    if not best_ticker:
+        raise ValueError("Single ticker strategy ticker optimisation failed")
+
+    return best_ticker
+
+
 def optimise_strategy_params(
     data: pl.DataFrame,
     strategy_type: str,

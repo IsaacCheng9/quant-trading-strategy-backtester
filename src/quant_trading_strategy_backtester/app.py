@@ -24,6 +24,8 @@ from quant_trading_strategy_backtester.data import (
 from quant_trading_strategy_backtester.optimiser import (
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
+    optimise_single_ticker_strategy_ticker,
+    optimise_strategy_params,
     run_backtest,
     run_optimisation,
 )
@@ -36,8 +38,8 @@ from quant_trading_strategy_backtester.utils import (
     NUM_TOP_COMPANIES_TWO_TICKERS,
 )
 from quant_trading_strategy_backtester.visualisation import (
-    display_returns_by_month,
     display_performance_metrics,
+    display_returns_by_month,
     plot_equity_curve,
     plot_strategy_returns,
 )
@@ -93,6 +95,85 @@ def prepare_buy_and_hold_strategy_with_optimisation(
     data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
 
     return data, best_ticker, {}
+
+
+def prepare_single_ticker_strategy_with_optimisation(
+    start_date: datetime.date,
+    end_date: datetime.date,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    optimise: bool,
+) -> tuple[pl.DataFrame, str, dict[str, Any]]:
+    """
+    Handles the optimisation process for single ticker strategies.
+
+    Selects the best ticker from the top S&P 500 companies and optimises
+    strategy parameters if requested.
+
+    Args:
+        start_date: The start date for historical data.
+        end_date: The end date for historical data.
+        strategy_type: The type of strategy being used.
+        strategy_params: Initial strategy parameters.
+        optimise: Whether to optimise strategy parameters.
+
+    Returns:
+        A tuple containing:
+            - Historical data for the selected ticker.
+            - The selected ticker symbol.
+            - Optimised strategy parameters.
+    """
+    st.info(
+        f"Selecting the best ticker from the top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
+        "companies. This may take a while..."
+    )
+
+    start_time = time.time()
+
+    # Fetch the top S&P 500 companies
+    with st.spinner("Fetching top S&P 500 companies..."):
+        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
+
+    # Optimise ticker selection
+    best_ticker = optimise_single_ticker_strategy_ticker(
+        top_companies, start_date, end_date, strategy_type, strategy_params
+    )
+
+    # Load historical data for the selected ticker
+    data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
+
+    # Optimise strategy parameters if requested
+    if optimise:
+        best_params, _ = optimise_strategy_params(
+            data,
+            strategy_type,
+            cast(dict[str, range] | dict[str, list[float]], strategy_params),
+        )
+    else:
+        best_params = {
+            k: v[0] if isinstance(v, (list, range)) else v
+            for k, v in strategy_params.items()
+        }
+
+    # Calculate and display the time taken for optimisation
+    end_time = time.time()
+    duration = end_time - start_time
+    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
+
+    # Display the optimal ticker and parameters (if optimised)
+    st.header("Optimal Ticker and Parameters")
+    if optimise:
+        result = {
+            "ticker": best_ticker,
+            **best_params,
+        }
+    else:
+        result = {
+            "ticker": best_ticker,
+        }
+    st.write(result)
+
+    return data, best_ticker, best_params
 
 
 def prepare_pairs_trading_strategy_with_optimisation(
@@ -287,9 +368,15 @@ def main():
         ticker1, ticker2 = cast(tuple[str, str], ticker)
         company_name1 = get_full_company_name(ticker1)
         company_name2 = get_full_company_name(ticker2)
-    elif strategy_type == "Buy and Hold" and auto_select_tickers:
+    # Optimise the ticker for single ticker strategies if option is selected
+    elif (
+        strategy_type in ["Buy and Hold", "Mean Reversion", "Moving Average Crossover"]
+        and auto_select_tickers
+    ):
         data, ticker_display, strategy_params = (
-            prepare_buy_and_hold_strategy_with_optimisation(start_date, end_date)
+            prepare_single_ticker_strategy_with_optimisation(
+                start_date, end_date, strategy_type, strategy_params, optimise
+            )
         )
         company_name1 = get_full_company_name(ticker_display)
     else:
