@@ -160,12 +160,17 @@ def prepare_single_ticker_strategy_with_optimisation(
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
 
-    # Display the optimal ticker and parameters
+    # Display the optimal ticker and parameters (if optimised)
     st.header("Optimal Ticker and Parameters")
-    result = {
-        "ticker": best_ticker,
-        **best_params,
-    }
+    if optimise:
+        result = {
+            "ticker": best_ticker,
+            **best_params,
+        }
+    else:
+        result = {
+            "ticker": best_ticker,
+        }
     st.write(result)
 
     return data, best_ticker, best_params
