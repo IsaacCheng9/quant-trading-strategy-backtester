@@ -34,7 +34,7 @@ def test_pairs_trading_strategy_generate_signals() -> None:
     assert signals["signal"].is_in([0.0, 1.0, -1.0]).all()
 
 
-def test_pairs_trading_strategy_initialization() -> None:
+def test_pairs_trading_strategy_initialisation() -> None:
     params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
     strategy = PairsTradingStrategy(params)
     assert strategy.window == 20

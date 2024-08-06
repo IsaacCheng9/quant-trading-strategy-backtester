@@ -4,7 +4,7 @@ from quant_trading_strategy_backtester.strategies.mean_reversion import (
 )
 
 
-def test_mean_reversion_strategy_initialization() -> None:
+def test_mean_reversion_strategy_initialisation() -> None:
     params = {"window": 20, "std_dev": 2.0}
     strategy = MeanReversionStrategy(params)
     assert strategy.window == 20

@@ -36,7 +36,7 @@ from quant_trading_strategy_backtester.strategies.pairs_trading import (
         ),
     ],
 )
-def test_backtester_initialization(
+def test_backtester_initialisation(
     request: pytest.FixtureRequest,
     strategy_class: Strategy,
     params: dict[str, Any],

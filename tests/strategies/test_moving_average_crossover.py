@@ -6,7 +6,7 @@ from quant_trading_strategy_backtester.strategies.moving_average_crossover impor
 )
 
 
-def test_moving_average_crossover_strategy_initialization() -> None:
+def test_moving_average_crossover_strategy_initialisation() -> None:
     params = {"short_window": 5, "long_window": 20}
     strategy = MovingAverageCrossoverStrategy(params)
     assert strategy.short_window == 5
