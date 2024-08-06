@@ -1,3 +1,6 @@
+"""
+Tests for the Pairs Trading strategy class.
+"""
 from datetime import date, timedelta
 
 import polars as pl
