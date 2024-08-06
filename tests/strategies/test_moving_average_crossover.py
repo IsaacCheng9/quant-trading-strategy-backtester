@@ -1,3 +1,6 @@
+"""
+Tests for the Moving Average Crossover strategy class.
+"""
 from datetime import date, timedelta
 
 import polars as pl
