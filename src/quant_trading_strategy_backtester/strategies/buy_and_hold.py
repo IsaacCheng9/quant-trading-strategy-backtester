@@ -1,3 +1,9 @@
+"""
+Implements the Buy and Hold strategy, which generates a buy signal on the first
+day and holds the position indefinitely. This is a simple strategy that serves
+as a benchmark to compare other trading strategies against.
+"""
+
 from typing import Any
 
 import polars as pl
