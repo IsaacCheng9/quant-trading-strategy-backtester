@@ -1,3 +1,9 @@
+"""
+Implements a pairs trading strategy for two correlated financial instruments,
+which is based on the assumption that the historical relationship between two
+assets will continue.
+"""
+
 from typing import Any
 
 import polars as pl
