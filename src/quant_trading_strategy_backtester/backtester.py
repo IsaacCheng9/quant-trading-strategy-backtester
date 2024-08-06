@@ -8,7 +8,7 @@ this repository.
 """
 
 import polars as pl
-from quant_trading_strategy_backtester.strategy_templates import Strategy
+from quant_trading_strategy_backtester.strategies.base import Strategy
 
 
 class Backtester:

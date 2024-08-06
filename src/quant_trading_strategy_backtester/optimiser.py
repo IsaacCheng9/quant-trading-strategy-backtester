@@ -10,6 +10,8 @@ from typing import Any, cast
 
 import polars as pl
 import streamlit as st
+from quant_trading_strategy_backtester.strategies.base import TRADING_STRATEGIES, Strategy
+from quant_trading_strategy_backtester.strategies.mean_reversion import MeanReversionStrategy
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.data import (
     get_top_sp500_companies,
@@ -17,13 +19,10 @@ from quant_trading_strategy_backtester.data import (
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
-from quant_trading_strategy_backtester.strategy_templates import (
-    TRADING_STRATEGIES,
+from quant_trading_strategy_backtester.strategies.moving_average_crossover import MovingAverageCrossoverStrategy
+from quant_trading_strategy_backtester.strategies.pairs_trading import PairsTradingStrategy
+from quant_trading_strategy_backtester.strategies.buy_and_hold import (
     BuyAndHoldStrategy,
-    MeanReversionStrategy,
-    MovingAverageCrossoverStrategy,
-    PairsTradingStrategy,
-    Strategy,
 )
 from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
 
