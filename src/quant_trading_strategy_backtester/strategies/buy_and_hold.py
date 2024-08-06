@@ -1,5 +1,5 @@
 """
-Implements the Buy and Hold strategy, which generates a buy signal on the first
+Implements the buy and hold strategy, which generates a buy signal on the first
 day and holds the position indefinitely. This is a simple strategy that serves
 as a benchmark to compare other trading strategies against.
 """
@@ -12,11 +12,12 @@ from quant_trading_strategy_backtester.strategies.base import Strategy
 
 class BuyAndHoldStrategy(Strategy):
     """
-    Implements a simple buy and hold strategy.
+    Implements a simple buy and hold strategy, which generates a buy signal on
+    the first day and holds the position indefinitely.
     """
 
     def __init__(self, params: dict[str, Any]):
-        # No parameters needed for this strategy
+        # No parameters needed for this strategy, as it's always the same.
         pass
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
