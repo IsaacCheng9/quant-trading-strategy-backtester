@@ -1,3 +1,8 @@
+"""
+Implements the moving average crossover strategy, which is based on the
+crossover of short-term and long-term moving averages of the closing price.
+"""
+
 from typing import Any
 
 import polars as pl
