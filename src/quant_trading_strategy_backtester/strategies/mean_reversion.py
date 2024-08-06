@@ -1,3 +1,7 @@
+"""
+Implements the mean reversion strategy, which is based on the assumptio that
+asset prices tend to revert to their mean over time.
+"""
 from typing import Any
 
 import polars as pl
