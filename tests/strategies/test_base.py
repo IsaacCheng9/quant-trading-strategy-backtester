@@ -1,5 +1,5 @@
 """
-Contains tests for the base strategy class.
+Tests for the base strategy class.
 """
 from quant_trading_strategy_backtester.strategies.base import Strategy
 from quant_trading_strategy_backtester.strategies.mean_reversion import MeanReversionStrategy
