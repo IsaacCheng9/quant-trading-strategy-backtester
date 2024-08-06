@@ -8,11 +8,15 @@ from typing import Any
 import polars as pl
 import pytest
 from quant_trading_strategy_backtester.backtester import Backtester
-from quant_trading_strategy_backtester.strategy_templates import (
+from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.strategies.mean_reversion import (
     MeanReversionStrategy,
+)
+from quant_trading_strategy_backtester.strategies.moving_average_crossover import (
     MovingAverageCrossoverStrategy,
+)
+from quant_trading_strategy_backtester.strategies.pairs_trading import (
     PairsTradingStrategy,
-    Strategy,
 )
 
 
@@ -32,7 +36,7 @@ from quant_trading_strategy_backtester.strategy_templates import (
         ),
     ],
 )
-def test_backtester_initialization(
+def test_backtester_initialisation(
     request: pytest.FixtureRequest,
     strategy_class: Strategy,
     params: dict[str, Any],
