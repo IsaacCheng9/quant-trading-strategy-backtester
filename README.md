@@ -42,8 +42,8 @@ was a backtest from 2020/01/01 to 2023/12/31 for the pairs trading strategy,
 with ticker-pair optimisation amongst the top 20 S&P 500 stocks and parameter
 optimisation enabled.
 
-**Polars had an average speed-up of over 110% compared to pandas on my local**
-**machine, and over 80% on the Streamlit instance.**
+**Polars was faster by 2.1x on average compared to pandas on my local**
+**machine, and faster by 1.8x on average on the Streamlit instance.**
 
 ![M1 Max Benchmark Results](./resources/m1_max_benchmark_results.png)
 
