@@ -13,6 +13,7 @@ numpy = "^2.0.1"
 yfinance = "^0.2.41"
 plotly = "^5.23.0"
 polars = "^1.4.0"
+sqlalchemy = "^2.0.35"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.5.5"
