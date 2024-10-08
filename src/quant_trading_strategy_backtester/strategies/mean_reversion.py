@@ -1,6 +1,6 @@
 """
-Implements the mean reversion strategy, which is based on the assumptio that
-asset prices tend to revert to their mean over time.
+Implements the mean reversion strategy, which is based on the assumption
+that asset prices tend to revert to their mean over time.
 """
 from typing import Any
 
@@ -22,6 +22,7 @@ class MeanReversionStrategy(Strategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        super().__init__(params)
         # The number of days to calculate the moving average and standard
         # deviation.
         self.window = int(params["window"])

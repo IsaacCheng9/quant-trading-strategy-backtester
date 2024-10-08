@@ -22,6 +22,7 @@ class MovingAverageCrossoverStrategy(Strategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        super().__init__(params)
         # The number of days for the short-term and long-term moving average.
         self.short_window = int(params["short_window"])
         self.long_window = int(params["long_window"])

@@ -24,6 +24,7 @@ class PairsTradingStrategy(Strategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        super().__init__(params)
         # The lookback period for calculating the rolling mean and standard
         # deviation of the spread.
         self.window = int(params["window"])

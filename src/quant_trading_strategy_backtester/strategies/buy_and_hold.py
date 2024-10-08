@@ -17,8 +17,8 @@ class BuyAndHoldStrategy(Strategy):
     """
 
     def __init__(self, params: dict[str, Any]):
-        # No parameters needed for this strategy, as it's always the same.
-        pass
+        # No additional parameters needed for this strategy, as it's always the same.
+        super().__init__(params)
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """
