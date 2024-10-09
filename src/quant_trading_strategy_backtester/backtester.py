@@ -7,7 +7,12 @@ designed to work with the strategy templates defined in a different module in
 this repository.
 """
 
+import json
+
 import polars as pl
+
+from quant_trading_strategy_backtester.models import Session
+from quant_trading_strategy_backtester.models import Strategy as StrategyModel
 from quant_trading_strategy_backtester.strategies.base import Strategy
 
 
@@ -38,13 +43,14 @@ class Backtester:
         Runs the backtest.
 
         Generates trading signals using the strategy, calculates returns,
-        and stores the results.
+        stores the results, and saves them to the database.
 
         Returns:
             A DataFrame containing the backtest results.
         """
         signals = self.strategy.generate_signals(self.data)
         self.results = self._calculate_returns(signals)
+        self.save_results()
         return self.results
 
     def _calculate_returns(self, signals: pl.DataFrame) -> pl.DataFrame:
@@ -123,13 +129,16 @@ class Backtester:
         if self.results is None:
             return None
 
-        total_return = self.results["cumulative_returns"].tail(1)[0] - 1
+        total_return = (
+            float(self.results["cumulative_returns"].cast(pl.Float64).tail(1).item())
+            - 1
+        )  # type: ignore
 
         # Measure the risk-adjusted return, assuming 252 trading days per year.
-        returns_mean = self.results["strategy_returns"].mean()
-        returns_std = self.results["strategy_returns"].std()
-        if returns_std != 0 and not pl.Series([returns_std]).is_nan()[0]:
-            sharpe_ratio = (252**0.5) * returns_mean / returns_std
+        returns_mean = float(self.results["strategy_returns"].cast(pl.Float64).mean())  # type: ignore
+        returns_std = float(self.results["strategy_returns"].cast(pl.Float64).std())  # type: ignore
+        if returns_std != 0:
+            sharpe_ratio = float((252**0.5) * returns_mean / returns_std)
         else:
             sharpe_ratio = float("nan")
 
@@ -137,10 +146,37 @@ class Backtester:
         drawdowns = (
             self.results["equity_curve"] / self.results["equity_curve"].cum_max() - 1
         )
-        max_drawdown = drawdowns.min()
+        max_drawdown = float(drawdowns.cast(pl.Float64).min())  # type: ignore
 
         return {
             "Total Return": total_return,
             "Sharpe Ratio": sharpe_ratio,
             "Max Drawdown": max_drawdown,
         }
+
+    def save_results(self) -> None:
+        """
+        Saves the strategy and its backtest results to the database.
+        """
+        metrics = self.get_performance_metrics()
+        if metrics is None:
+            raise ValueError("Backtest hasn't been run yet. Call run() first.")
+
+        strategy_params = self.strategy.get_parameters()
+
+        session = Session()
+        try:
+            new_strategy = StrategyModel(
+                name=self.strategy.__class__.__name__,
+                parameters=json.dumps(strategy_params),
+                total_return=metrics["Total Return"],
+                sharpe_ratio=metrics["Sharpe Ratio"],
+                max_drawdown=metrics["Max Drawdown"],
+            )
+            session.add(new_strategy)
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            raise ValueError(f"Failed to save strategy results: {str(e)}")
+        finally:
+            session.close()
