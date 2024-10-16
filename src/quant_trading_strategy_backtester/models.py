@@ -6,7 +6,7 @@ import datetime
 Base = declarative_base()
 
 
-class Strategy(Base):
+class StrategyModel(Base):
     __tablename__ = "strategies"
 
     id = Column(Integer, primary_key=True)
@@ -14,7 +14,7 @@ class Strategy(Base):
     name = Column(String, nullable=False)
     parameters = Column(JSON, nullable=False)
     total_return = Column(Float, nullable=False)
-    sharpe_ratio = Column(Float, nullable=False)
+    sharpe_ratio = Column(Float, nullable=True)
     max_drawdown = Column(Float, nullable=False)
 
 
