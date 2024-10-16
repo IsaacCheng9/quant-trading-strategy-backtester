@@ -10,17 +10,20 @@ For instructions on how to run the application, refer to the README.md.
 """
 
 import datetime
+import json
 import time
 from typing import Any, cast
 
 import polars as pl
 import streamlit as st
+
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
+from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
@@ -325,6 +328,58 @@ def prepare_single_ticker_strategy(
     return data, ticker_display, strategy_params
 
 
+def display_historical_results():
+    """
+    Displays historical strategy results from the database in an organized format.
+    """
+    session = Session()
+    strategies = (
+        session.query(StrategyModel).order_by(StrategyModel.date_created.desc()).all()
+    )
+    session.close()
+
+    if not strategies:
+        st.info("No historical strategy results available.")
+        return
+
+    st.header("Historical Strategy Results")
+    for strategy in strategies:
+        with st.expander(
+            f"{strategy.name} - {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
+        ):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.subheader("Strategy Details")
+                st.write(f"**Strategy Type:** {strategy.name}")
+                st.write(
+                    f"**Date Created:** {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+
+                st.subheader("Parameters")
+                # Handle parameters whether they're stored as JSON string or dict
+                if isinstance(strategy.parameters, str):
+                    try:
+                        params = json.loads(strategy.parameters)
+                    except json.JSONDecodeError:
+                        params = {"Error": "Unable to parse parameters"}
+                elif isinstance(strategy.parameters, dict):
+                    params = strategy.parameters
+                else:
+                    params = {"Error": "Unknown parameter format"}
+
+                for key, value in params.items():
+                    st.write(f"**{key}:** {value}")
+
+            with col2:
+                st.subheader("Performance Metrics")
+                st.write(f"**Total Return:** {strategy.total_return:.2%}")
+                st.write(f"**Sharpe Ratio:** {strategy.sharpe_ratio:.2f}")
+                st.write(f"**Max Drawdown:** {strategy.max_drawdown:.2%}")
+
+            st.write("---")
+
+
 def main():
     """
     Orchestrates the Streamlit app flow.
@@ -402,6 +457,7 @@ def main():
 
     # Run the backtest and display the results
     results, metrics = run_backtest(data, strategy_type, strategy_params)
+
     display_performance_metrics(metrics, company_display)
     plot_equity_curve(results, ticker_display, company_display)
     plot_strategy_returns(results, ticker_display, company_display)
@@ -414,6 +470,9 @@ def main():
         use_container_width=True,
         hide_index=True,
     )
+
+    # Display historical results
+    display_historical_results()
 
 
 if __name__ == "__main__":
