@@ -379,7 +379,10 @@ def display_historical_results():
             with col2:
                 st.subheader("Performance Metrics")
                 st.write(f"**Total Return:** {strategy.total_return:.2%}")
-                st.write(f"**Sharpe Ratio:** {strategy.sharpe_ratio:.2f}")
+                if strategy.sharpe_ratio:
+                    st.write(f"**Sharpe Ratio:** {strategy.sharpe_ratio:.2f}")
+                else:
+                    st.write("**Sharpe Ratio:** N/A")
                 st.write(f"**Max Drawdown:** {strategy.max_drawdown:.2%}")
 
             st.write("---")
