@@ -161,24 +161,38 @@ class Backtester:
 
     def save_results(self) -> None:
         """
-        Saves the strategy and its backtest results to the database.
+        Saves the strategy and its backtest results to the database if not already present.
         """
         metrics = self.get_performance_metrics()
         if metrics is None:
             raise ValueError("Backtest hasn't been run yet. Call run() first.")
 
         strategy_params = self.strategy.get_parameters()
+        strategy_name = self.strategy.__class__.__name__
 
         try:
-            new_strategy = StrategyModel(
-                name=self.strategy.__class__.__name__,
-                parameters=json.dumps(strategy_params),
-                total_return=metrics["Total Return"],
-                sharpe_ratio=metrics["Sharpe Ratio"],
-                max_drawdown=metrics["Max Drawdown"],
+            # Check if a strategy with the same name and parameters already exists
+            existing_strategy = (
+                self.session.query(StrategyModel)
+                .filter_by(name=strategy_name, parameters=json.dumps(strategy_params))
+                .first()
             )
-            self.session.add(new_strategy)
-            self.session.commit()
+
+            if existing_strategy is None:
+                new_strategy = StrategyModel(
+                    name=strategy_name,
+                    parameters=json.dumps(strategy_params),
+                    total_return=metrics["Total Return"],
+                    sharpe_ratio=metrics["Sharpe Ratio"],
+                    max_drawdown=metrics["Max Drawdown"],
+                )
+                self.session.add(new_strategy)
+                self.session.commit()
+                print(f"Strategy {strategy_name} saved successfully.")
+            else:
+                print(
+                    f"Strategy {strategy_name} with same parameters already exists. Skipping save."
+                )
         except Exception as e:
             self.session.rollback()
             raise ValueError(f"Failed to save strategy results: {str(e)}")

@@ -330,7 +330,8 @@ def prepare_single_ticker_strategy(
 
 def display_historical_results():
     """
-    Displays historical strategy results from the database in an organized format.
+    Displays historical strategy results from the database in an organised
+    format, showing only the most recent entry for each unique strategy.
     """
     session = Session()
     strategies = (
@@ -343,32 +344,36 @@ def display_historical_results():
         return
 
     st.header("Historical Strategy Results")
+
+    # Group strategies by name and parameters
+    unique_strategies = {}
     for strategy in strategies:
+        # Handle cases where parameters might be a string or a dict
+        if isinstance(strategy.parameters, str):
+            params = json.loads(strategy.parameters)
+        else:
+            params = strategy.parameters
+
+        key = (strategy.name, frozenset(params.items()))
+        if key not in unique_strategies:
+            unique_strategies[key] = strategy
+
+    # Display only the most recent entry for each unique strategy
+    for (strategy_name, params), strategy in unique_strategies.items():
         with st.expander(
-            f"{strategy.name} - {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
+            f"{strategy_name} - {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
         ):
             col1, col2 = st.columns(2)
 
             with col1:
                 st.subheader("Strategy Details")
-                st.write(f"**Strategy Type:** {strategy.name}")
+                st.write(f"**Strategy Type:** {strategy_name}")
                 st.write(
                     f"**Date Created:** {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
                 )
 
                 st.subheader("Parameters")
-                # Handle parameters whether they're stored as JSON string or dict
-                if isinstance(strategy.parameters, str):
-                    try:
-                        params = json.loads(strategy.parameters)
-                    except json.JSONDecodeError:
-                        params = {"Error": "Unable to parse parameters"}
-                elif isinstance(strategy.parameters, dict):
-                    params = strategy.parameters
-                else:
-                    params = {"Error": "Unknown parameter format"}
-
-                for key, value in params.items():
+                for key, value in dict(params).items():
                     st.write(f"**{key}:** {value}")
 
             with col2:
