@@ -3,12 +3,14 @@ Contains tests for the Backtester class and its methods.
 """
 
 import datetime
+import math
 from typing import Any
 
 import polars as pl
 import pytest
 from quant_trading_strategy_backtester.backtester import Backtester
-from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.models import StrategyModel
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 from quant_trading_strategy_backtester.strategies.mean_reversion import (
     MeanReversionStrategy,
 )
@@ -38,7 +40,7 @@ from quant_trading_strategy_backtester.strategies.pairs_trading import (
 )
 def test_backtester_initialisation(
     request: pytest.FixtureRequest,
-    strategy_class: Strategy,
+    strategy_class: BaseStrategy,
     params: dict[str, Any],
     data_fixture: str,
 ) -> None:
@@ -73,7 +75,7 @@ def test_backtester_initialisation(
 )
 def test_backtester_run(
     request: pytest.FixtureRequest,
-    strategy_class: Strategy,
+    strategy_class: BaseStrategy,
     params: dict[str, Any],
     data_fixture: str,
 ) -> None:
@@ -105,7 +107,7 @@ def test_backtester_run(
 )
 def test_backtester_get_performance_metrics(
     request: pytest.FixtureRequest,
-    strategy_class: Strategy,
+    strategy_class: BaseStrategy,
     params: dict[str, Any],
     data_fixture: str,
 ) -> None:
@@ -132,7 +134,7 @@ def test_backtester_get_performance_metrics(
     ],
 )
 def test_backtester_with_invalid_data(
-    strategy_class: Strategy, params: dict[str, Any]
+    strategy_class: BaseStrategy, params: dict[str, Any]
 ) -> None:
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
     if strategy_class == PairsTradingStrategy:
@@ -171,7 +173,7 @@ def test_backtester_with_invalid_data(
     ],
 )
 def test_backtester_with_insufficient_data_all_strategies(
-    strategy_class: Strategy, params: dict[str, Any]
+    strategy_class: BaseStrategy, params: dict[str, Any]
 ) -> None:
     dates = [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
     if strategy_class == PairsTradingStrategy:
@@ -203,3 +205,32 @@ def test_backtester_with_insufficient_data_all_strategies(
     assert abs(results["cumulative_returns"].tail(1)[0] - 1) < 1e-6
     # Verify that the DataFrame has the expected number of rows
     assert len(results) == len(insufficient_data)
+
+
+def test_backtester_save_results(mock_db_session, mock_polars_data):
+    strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
+    backtester = Backtester(mock_polars_data, strategy, session=mock_db_session)
+    backtester.run()
+
+    # Print metrics for debugging
+    metrics = backtester.get_performance_metrics()
+    print("Metrics before saving:", metrics)
+
+    # Verify that the results were saved to the mocked database
+    saved_strategy = (
+        mock_db_session.query(StrategyModel)
+        .filter_by(name="MovingAverageCrossoverStrategy")
+        .first()
+    )
+
+    assert saved_strategy is not None
+    print("Saved strategy:", saved_strategy.__dict__)
+    assert saved_strategy.parameters == '{"short_window": 5, "long_window": 20}'
+    assert saved_strategy.total_return is not None
+
+    # Check if sharpe_ratio is either NaN or None
+    assert saved_strategy.sharpe_ratio is None or math.isnan(
+        saved_strategy.sharpe_ratio
+    )
+
+    assert saved_strategy.max_drawdown is not None

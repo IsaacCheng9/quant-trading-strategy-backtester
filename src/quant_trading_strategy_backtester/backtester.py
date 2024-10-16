@@ -12,8 +12,8 @@ import json
 import polars as pl
 
 from quant_trading_strategy_backtester.models import Session
-from quant_trading_strategy_backtester.models import Strategy as StrategyModel
-from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.models import StrategyModel as StrategyModel
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
 class Backtester:
@@ -31,12 +31,17 @@ class Backtester:
     """
 
     def __init__(
-        self, data: pl.DataFrame, strategy: Strategy, initial_capital: float = 100000.0
+        self,
+        data: pl.DataFrame,
+        strategy: BaseStrategy,
+        initial_capital: float = 100000.0,
+        session=None,
     ) -> None:
         self.data = data
         self.strategy = strategy
         self.initial_capital = initial_capital
-        self.results = None
+        self.results: None | pl.DataFrame = None
+        self.session = session or Session()
 
     def run(self) -> pl.DataFrame:
         """
@@ -132,7 +137,7 @@ class Backtester:
         total_return = (
             float(self.results["cumulative_returns"].cast(pl.Float64).tail(1).item())
             - 1
-        )  # type: ignore
+        )
 
         # Measure the risk-adjusted return, assuming 252 trading days per year.
         returns_mean = float(self.results["strategy_returns"].cast(pl.Float64).mean())  # type: ignore
@@ -164,7 +169,6 @@ class Backtester:
 
         strategy_params = self.strategy.get_parameters()
 
-        session = Session()
         try:
             new_strategy = StrategyModel(
                 name=self.strategy.__class__.__name__,
@@ -173,10 +177,8 @@ class Backtester:
                 sharpe_ratio=metrics["Sharpe Ratio"],
                 max_drawdown=metrics["Max Drawdown"],
             )
-            session.add(new_strategy)
-            session.commit()
+            self.session.add(new_strategy)
+            self.session.commit()
         except Exception as e:
-            session.rollback()
+            self.session.rollback()
             raise ValueError(f"Failed to save strategy results: {str(e)}")
-        finally:
-            session.close()
