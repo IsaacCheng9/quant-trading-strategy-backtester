@@ -5,10 +5,10 @@ that asset prices tend to revert to their mean over time.
 from typing import Any
 
 import polars as pl
-from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
-class MeanReversionStrategy(Strategy):
+class MeanReversionStrategy(BaseStrategy):
     """
     Implements the mean reversion strategy, which is based on the assumption
     that asset prices tend to revert to their mean over time. Prices are

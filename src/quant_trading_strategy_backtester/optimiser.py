@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import polars as pl
 import streamlit as st
-from quant_trading_strategy_backtester.strategies.base import TRADING_STRATEGIES, Strategy
+from quant_trading_strategy_backtester.strategies.base import TRADING_STRATEGIES, BaseStrategy
 from quant_trading_strategy_backtester.strategies.mean_reversion import MeanReversionStrategy
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.data import (
@@ -348,7 +348,7 @@ def run_backtest(
     return results, metrics
 
 
-def create_strategy(strategy_type: str, strategy_params: dict[str, Any]) -> Strategy:
+def create_strategy(strategy_type: str, strategy_params: dict[str, Any]) -> BaseStrategy:
     """
     Creates a trading strategy object based on the selected strategy type.
 

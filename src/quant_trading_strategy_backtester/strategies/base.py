@@ -19,7 +19,7 @@ TRADING_STRATEGIES = [
 ]
 
 
-class Strategy(ABC):
+class BaseStrategy(ABC):
     """
     Abstract base class for a trading strategy.
 

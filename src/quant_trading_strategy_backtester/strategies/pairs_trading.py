@@ -7,10 +7,10 @@ assets will continue.
 from typing import Any
 
 import polars as pl
-from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
-class PairsTradingStrategy(Strategy):
+class PairsTradingStrategy(BaseStrategy):
     """
     Implements a pairs trading strategy for two correlated financial
     instruments, which is based on the assumption that the historical

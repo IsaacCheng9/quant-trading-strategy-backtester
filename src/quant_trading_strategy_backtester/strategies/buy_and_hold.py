@@ -7,10 +7,10 @@ as a benchmark to compare other trading strategies against.
 from typing import Any
 
 import polars as pl
-from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
-class BuyAndHoldStrategy(Strategy):
+class BuyAndHoldStrategy(BaseStrategy):
     """
     Implements a simple buy and hold strategy, which generates a buy signal on
     the first day and holds the position indefinitely.
