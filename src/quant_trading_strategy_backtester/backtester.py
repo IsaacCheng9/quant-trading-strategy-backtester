@@ -8,6 +8,7 @@ this repository.
 """
 
 import json
+from datetime import date
 
 import polars as pl
 
@@ -28,6 +29,7 @@ class Backtester:
         strategy: The trading strategy to backtest.
         initial_capital: The initial capital for the backtest.
         results: The results of the backtest (initialised after running).
+        tickers: The ticker or tickers used in the backtest.
     """
 
     def __init__(
@@ -36,12 +38,14 @@ class Backtester:
         strategy: BaseStrategy,
         initial_capital: float = 100000.0,
         session=None,
+        tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data
         self.strategy = strategy
         self.initial_capital = initial_capital
         self.results: None | pl.DataFrame = None
         self.session = session or Session()
+        self.tickers = tickers
 
     def run(self) -> pl.DataFrame:
         """
@@ -170,11 +174,39 @@ class Backtester:
         strategy_params = self.strategy.get_parameters()
         strategy_name = self.strategy.__class__.__name__
 
+        # Extract tickers from data columns if not provided
+        if self.tickers is None:
+            if "Close_1" in self.data.columns and "Close_2" in self.data.columns:
+                pass
+            else:
+                pass
+
+        # Determine start and end dates
+        start_date_row = self.data.select(
+            pl.col("Date").dt.year().alias("year"),
+            pl.col("Date").dt.month().alias("month"),
+            pl.col("Date").dt.day().alias("day"),
+        ).row(0)
+        end_date_row = self.data.select(
+            pl.col("Date").dt.year().alias("year"),
+            pl.col("Date").dt.month().alias("month"),
+            pl.col("Date").dt.day().alias("day"),
+        ).row(-1)
+
+        start_date = date(start_date_row[0], start_date_row[1], start_date_row[2])
+        end_date = date(end_date_row[0], end_date_row[1], end_date_row[2])
+
         try:
-            # Check if a strategy with the same name and parameters already exists
+            # Check if a strategy with the same name, parameters, and date
+            # range already exists
             existing_strategy = (
                 self.session.query(StrategyModel)
-                .filter_by(name=strategy_name, parameters=json.dumps(strategy_params))
+                .filter_by(
+                    name=strategy_name,
+                    parameters=json.dumps(strategy_params),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
                 .first()
             )
 
@@ -185,6 +217,9 @@ class Backtester:
                     total_return=metrics["Total Return"],
                     sharpe_ratio=metrics["Sharpe Ratio"],
                     max_drawdown=metrics["Max Drawdown"],
+                    tickers=json.dumps(self.tickers),
+                    start_date=start_date,
+                    end_date=end_date,
                 )
                 self.session.add(new_strategy)
                 self.session.commit()

@@ -150,7 +150,8 @@ def prepare_single_ticker_strategy_with_optimisation(
         best_params, _ = optimise_strategy_params(
             data,
             strategy_type,
-            cast(dict[str, range] | dict[str, list[float]], strategy_params),
+            cast(dict[str, range | list[int | float]], strategy_params),
+            best_ticker,
         )
     else:
         best_params = {
@@ -238,6 +239,16 @@ def prepare_pairs_trading_strategy_with_optimisation(
     data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
     ticker_display = f"{ticker1} vs. {ticker2}"
 
+    if optimise:
+        strategy_params, _ = run_optimisation(
+            data,
+            "Pairs Trading",
+            strategy_params,
+            start_date,
+            end_date,
+            [ticker1, ticker2],
+        )
+
     return data, ticker_display, strategy_params
 
 
@@ -274,7 +285,12 @@ def prepare_pairs_trading_strategy_without_optimisation(
 
     if optimise:
         strategy_params, _ = run_optimisation(
-            data, "Pairs Trading", strategy_params, start_date, end_date
+            data,
+            "Pairs Trading",
+            strategy_params,
+            start_date,
+            end_date,
+            [ticker1, ticker2],
         )
 
     return data, ticker_display, strategy_params
@@ -314,7 +330,7 @@ def prepare_single_ticker_strategy(
 
     if optimise and strategy_type != "Buy and Hold":
         strategy_params, _ = run_optimisation(
-            data, strategy_type, strategy_params, start_date, end_date
+            data, strategy_type, strategy_params, start_date, end_date, ticker
         )
     elif optimise and strategy_type == "Buy and Hold":
         top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
@@ -464,7 +480,12 @@ def main():
         company_display = company_name1
 
     # Run the backtest and display the results
-    results, metrics = run_backtest(data, strategy_type, strategy_params)
+    tickers = (
+        ticker_display.split(" vs. ")
+        if strategy_type == "Pairs Trading"
+        else ticker_display
+    )
+    results, metrics = run_backtest(data, strategy_type, strategy_params, tickers)
 
     display_performance_metrics(metrics, company_display)
     plot_equity_curve(results, ticker_display, company_display)
