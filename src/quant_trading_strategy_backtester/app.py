@@ -370,23 +370,33 @@ def display_historical_results():
         else:
             params = strategy.parameters
 
+        # Handle cases where tickers might be a string or a list
+        if isinstance(strategy.tickers, str):
+            tickers = json.loads(strategy.tickers)
+        else:
+            tickers = strategy.tickers
+
         key = (strategy.name, frozenset(params.items()))
         if key not in unique_strategies:
-            unique_strategies[key] = strategy
+            unique_strategies[key] = (strategy, tickers)
 
     # Display only the most recent entry for each unique strategy
-    for (strategy_name, params), strategy in unique_strategies.items():
+    for (strategy_name, params), (strategy, tickers) in unique_strategies.items():
+        ticker_display = " vs. ".join(tickers) if isinstance(tickers, list) else tickers
         with st.expander(
-            f"{strategy_name} - {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
+            f"{strategy_name} - {ticker_display} - {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
         ):
             col1, col2 = st.columns(2)
 
             with col1:
                 st.subheader("Strategy Details")
                 st.write(f"**Strategy Type:** {strategy_name}")
+                st.write(f"**Ticker(s):** {ticker_display}")
                 st.write(
                     f"**Date Created:** {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
                 )
+                st.write(f"**Start Date:** {strategy.start_date}")
+                st.write(f"**End Date:** {strategy.end_date}")
 
                 st.subheader("Parameters")
                 for key, value in dict(params).items():
