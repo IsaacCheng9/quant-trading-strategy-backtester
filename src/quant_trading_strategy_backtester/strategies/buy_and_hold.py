@@ -31,6 +31,23 @@ class BuyAndHoldStrategy(BaseStrategy):
         Returns:
             A Polars DataFrame containing the trading signals.
         """
+        if data.is_empty():
+            return pl.DataFrame(
+                schema=[
+                    ("Date", pl.Date),
+                    ("Close", pl.Float64),
+                    ("signal", pl.Float64),
+                    ("positions", pl.Float64),
+                ]
+            )
+
         signals = data.select([pl.col("Date"), pl.col("Close")])
-        signals = signals.with_columns(pl.lit(1.0).alias("positions"))
+        # Add the 'signal' and 'positions' columns.
+        signals = signals.with_columns(
+            [
+                pl.lit(1.0).alias("signal"),
+                pl.lit(1.0).alias("positions"),
+            ]
+        )
+
         return signals
