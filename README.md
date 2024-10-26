@@ -59,7 +59,7 @@ The full benchmark results can be found in the CSV files in the
 Run the following command from the [project root](./) directory:
 
 ```bash
-poetry sync
+uv sync --all-extras --dev
 ```
 
 ### Running the Application Locally
@@ -70,7 +70,7 @@ Run the following command from the [project root](./) directory:
 poe app
 ```
 
-Alternatively, run it directly with Poetry (skipping the Poe alias):
+Alternatively, run it directly with uv (skipping the Poe alias):
 
 ```bash
 uv run streamlit run src/quant_trading_strategy_backtester/app.py
