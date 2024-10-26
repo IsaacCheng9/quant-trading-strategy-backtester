@@ -22,25 +22,15 @@ class BuyAndHoldStrategy(BaseStrategy):
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """
-        Generates a buy signal on the first day and holds.
-        """
-        if data.is_empty():
-            return pl.DataFrame(
-                schema=[
-                    ("Date", pl.Date),
-                    ("Close", pl.Float64),
-                    ("short_mavg", pl.Float64),
-                    ("long_mavg", pl.Float64),
-                    ("signal", pl.Float64),
-                    ("positions", pl.Float64),
-                ]
-            )
+        Generates trading signals for the Buy and Hold strategy. Creates a
+        column of 1s to indicate a constant long position.
 
+        Args:
+            data: Historical price data.
+
+        Returns:
+            A Polars DataFrame containing the trading signals.
+        """
         signals = data.select([pl.col("Date"), pl.col("Close")])
-        signals = signals.with_columns(
-            [
-                pl.lit(1).alias("signal"),
-                pl.lit(1).alias("positions").first().alias("positions"),
-            ]
-        )
+        signals = signals.with_columns(pl.lit(1.0).alias("positions"))
         return signals

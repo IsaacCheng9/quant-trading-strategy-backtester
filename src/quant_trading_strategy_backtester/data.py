@@ -29,7 +29,13 @@ def load_yfinance_data_one_ticker(
         A Polars DataFrame containing the historical stock data.
     """
     data = yf.download(ticker, start=start_date, end=end_date)
-    return pl.from_pandas(data.reset_index())
+    # Handle MultiIndex columns by taking just the first level
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.get_level_values(0)
+    # Reset index to make Date a regular column
+    data = data.reset_index()
+
+    return pl.from_pandas(data)
 
 
 @st.cache_data
