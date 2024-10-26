@@ -1,31 +1,37 @@
-[tool.poetry]
+[project]
+authors = [
+    {name = "Isaac Cheng", email = "47993930+IsaacCheng9@users.noreply.github.com"},
+]
+requires-python = "<4.0,>=3.12"
+dependencies = [
+    "streamlit<2.0.0,>=1.37.0",
+    "pandas<3.0.0,>=2.2.3",
+    "numpy<3.0.0,>=2.1.2",
+    "yfinance<1.0.0,>=0.2.44",
+    "plotly<6.0.0,>=5.23.0",
+    "polars<2.0.0,>=1.10.0",
+    "sqlalchemy<3.0.0,>=2.0.35",
+]
 name = "quant-trading-strategy-backtester"
 version = "0.1.0"
 description = "A quantitative trading strategy backtester with an interactive dashboard. Enables users to implement, test, and visualise trading strategies using historical market data, featuring customisable parameters and key performance metrics. Developed with Python."
-authors = ["Isaac Cheng <47993930+IsaacCheng9@users.noreply.github.com>"]
 readme = "README.md"
 
-[tool.poetry.dependencies]
-python = "^3.12"
-streamlit = "^1.37.0"
-pandas = "^2.2.2"
-numpy = "^2.0.1"
-yfinance = "^0.2.41"
-plotly = "^5.23.0"
-polars = "^1.4.0"
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
-[tool.poetry.group.dev.dependencies]
-ruff = "^0.5.5"
-pytest = "^8.3.2"
-poethepoet = "^0.27.0"
-watchdog = "^4.0.1"
-coverage = "^7.6.0"
-mypy = "^1.11.0"
-pandas-stubs = "^2.2.2.240603"
+[tool.uv]
+dev-dependencies = [
+    "ruff<1.0.0,>=0.5.5",
+    "pytest<9.0.0,>=8.3.2",
+    "poethepoet<1.0.0,>=0.27.0",
+    "watchdog<5.0.0,>=4.0.1",
+    "coverage<8.0.0,>=7.6.0",
+    "mypy<2.0.0,>=1.11.0",
+    "pandas-stubs<3.0.0.0,>=2.2.2.240603",
+    "pytest-cov<6.0.0,>=5.0.0",
+]
 
 [tool.poe.tasks]
-app = "poetry run streamlit run src/quant_trading_strategy_backtester/app.py"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+app = "uv run streamlit run src/quant_trading_strategy_backtester/app.py"

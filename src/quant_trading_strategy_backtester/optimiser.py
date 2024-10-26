@@ -10,8 +10,7 @@ from typing import Any, cast
 
 import polars as pl
 import streamlit as st
-from quant_trading_strategy_backtester.strategies.base import TRADING_STRATEGIES, Strategy
-from quant_trading_strategy_backtester.strategies.mean_reversion import MeanReversionStrategy
+
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.data import (
     get_top_sp500_companies,
@@ -19,10 +18,19 @@ from quant_trading_strategy_backtester.data import (
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
-from quant_trading_strategy_backtester.strategies.moving_average_crossover import MovingAverageCrossoverStrategy
-from quant_trading_strategy_backtester.strategies.pairs_trading import PairsTradingStrategy
-from quant_trading_strategy_backtester.strategies.buy_and_hold import (
-    BuyAndHoldStrategy,
+from quant_trading_strategy_backtester.strategies.base import (
+    TRADING_STRATEGIES,
+    BaseStrategy,
+)
+from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
+from quant_trading_strategy_backtester.strategies.mean_reversion import (
+    MeanReversionStrategy,
+)
+from quant_trading_strategy_backtester.strategies.moving_average_crossover import (
+    MovingAverageCrossoverStrategy,
+)
+from quant_trading_strategy_backtester.strategies.pairs_trading import (
+    PairsTradingStrategy,
 )
 from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
 
@@ -33,6 +41,7 @@ def run_optimisation(
     strategy_params: dict[str, Any],
     start_date: datetime.date,
     end_date: datetime.date,
+    tickers: str | list[str],
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """
     Runs the optimisation process for strategy parameters or ticker selection.
@@ -43,6 +52,7 @@ def run_optimisation(
         strategy_params: Initial strategy parameters or parameter ranges.
         start_date: Start date for historical data.
         end_date: End date for historical data.
+        tickers: The ticker or tickers used in the backtest.
 
     Returns:
         A tuple containing:
@@ -62,7 +72,8 @@ def run_optimisation(
         strategy_params, metrics = optimise_strategy_params(
             data,
             strategy_type,
-            cast(dict[str, range] | dict[str, list[float]], strategy_params),
+            cast(dict[str, range | list[int | float]], strategy_params),
+            tickers,
         )
 
     end_time = time.time()
@@ -110,7 +121,7 @@ def optimise_buy_and_hold_ticker(
             continue
 
         strategy = BuyAndHoldStrategy({})
-        backtester = Backtester(data, strategy)
+        backtester = Backtester(data, strategy, tickers=ticker)
         backtester.run()
         metrics = backtester.get_performance_metrics()
 
@@ -170,7 +181,7 @@ def optimise_single_ticker_strategy_ticker(
         if data is None or data.is_empty():
             continue
 
-        _, current_metrics = run_backtest(data, strategy_type, fixed_params)
+        _, current_metrics = run_backtest(data, strategy_type, fixed_params, ticker)
 
         if current_metrics["Sharpe Ratio"] > best_sharpe_ratio:
             best_sharpe_ratio = current_metrics["Sharpe Ratio"]
@@ -188,8 +199,9 @@ def optimise_single_ticker_strategy_ticker(
 def optimise_strategy_params(
     data: pl.DataFrame,
     strategy_type: str,
-    parameter_ranges: dict[str, range] | dict[str, list[float]],
-) -> tuple[dict[str, int] | dict[str, float], dict[str, float]]:
+    parameter_ranges: dict[str, range | list[int | float]],
+    tickers: str | list[str],
+) -> tuple[dict[str, int | float], dict[str, float]]:
     """
     Optimises strategy parameters by testing all combinations within given
     ranges.
@@ -199,6 +211,7 @@ def optimise_strategy_params(
         strategy_type: The type of strategy to optimise.
         parameter_ranges: A dictionary of parameters and their possible values
                           to test.
+        tickers: The ticker or tickers used in the backtest.
 
     Returns:
         A tuple containing the best parameters and their performance metrics.
@@ -226,7 +239,7 @@ def optimise_strategy_params(
         progress_bar.progress((i + 1) / total_combinations)
 
         current_params = dict(zip(param_names, params))
-        _, metrics = run_backtest(data, strategy_type, current_params)
+        _, metrics = run_backtest(data, strategy_type, current_params, tickers)
 
         if metrics["Sharpe Ratio"] > best_sharpe_ratio:
             best_sharpe_ratio = metrics["Sharpe Ratio"]
@@ -300,10 +313,12 @@ def optimise_pairs_trading_tickers(
                 for k, v in strategy_params.items()
             }
             current_params, current_metrics = optimise_strategy_params(
-                data, "Pairs Trading", param_ranges
+                data, "Pairs Trading", param_ranges, [ticker1, ticker2]
             )
         else:
-            _, current_metrics = run_backtest(data, "Pairs Trading", strategy_params)
+            _, current_metrics = run_backtest(
+                data, "Pairs Trading", strategy_params, [ticker1, ticker2]
+            )
             current_params = strategy_params
 
         if current_metrics["Sharpe Ratio"] > best_sharpe_ratio:
@@ -324,7 +339,10 @@ def optimise_pairs_trading_tickers(
 
 
 def run_backtest(
-    data: pl.DataFrame, strategy_type: str, strategy_params: dict[str, Any]
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
 ) -> tuple[pl.DataFrame, dict]:
     """
     Executes the backtest using the selected strategy and parameters.
@@ -333,12 +351,13 @@ def run_backtest(
         data: Historical stock data.
         strategy_type: The type of strategy to use for the backtest.
         strategy_params: Additional parameters required for the strategy.
+        tickers: The ticker or tickers used in the backtest.
 
     Returns:
         A tuple containing the backtest results DataFrame and performance metrics.
     """
     strategy = create_strategy(strategy_type, strategy_params)
-    backtester = Backtester(data, strategy)
+    backtester = Backtester(data, strategy, tickers=tickers)
     results = backtester.run()
     metrics = backtester.get_performance_metrics()
     assert (
@@ -348,7 +367,9 @@ def run_backtest(
     return results, metrics
 
 
-def create_strategy(strategy_type: str, strategy_params: dict[str, Any]) -> Strategy:
+def create_strategy(
+    strategy_type: str, strategy_params: dict[str, Any]
+) -> BaseStrategy:
     """
     Creates a trading strategy object based on the selected strategy type.
 

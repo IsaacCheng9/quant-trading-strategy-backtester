@@ -6,10 +6,10 @@ crossover of short-term and long-term moving averages of the closing price.
 from typing import Any
 
 import polars as pl
-from quant_trading_strategy_backtester.strategies.base import Strategy
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
-class MovingAverageCrossoverStrategy(Strategy):
+class MovingAverageCrossoverStrategy(BaseStrategy):
     """
     Implements the moving average crossover strategy, which is based on the
     crossover of short-term and long-term moving averages of the closing price.
@@ -22,6 +22,7 @@ class MovingAverageCrossoverStrategy(Strategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        super().__init__(params)
         # The number of days for the short-term and long-term moving average.
         self.short_window = int(params["short_window"])
         self.long_window = int(params["long_window"])

@@ -97,7 +97,7 @@ def test_run_optimisation_buy_and_hold(monkeypatch):
     end_date = datetime.date(2020, 12, 31)
 
     optimised_params, metrics = run_optimisation(
-        mock_polars_data, strategy_type, initial_params, start_date, end_date
+        mock_polars_data, strategy_type, initial_params, start_date, end_date, "AAPL"
     )
 
     assert isinstance(optimised_params, dict)
@@ -239,6 +239,12 @@ def test_handle_pairs_trading_optimisation(monkeypatch):
     def mock_load_data(*args, **kwargs):
         return mock_polars_data
 
+    def mock_run_optimisation(*args, **kwargs):
+        return (
+            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+            {"Sharpe Ratio": 1.5, "Total Return": 0.2, "Max Drawdown": -0.1},
+        )
+
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app.get_top_sp500_companies",
         mock_get_top_companies,
@@ -251,10 +257,18 @@ def test_handle_pairs_trading_optimisation(monkeypatch):
         "quant_trading_strategy_backtester.app.load_yfinance_data_two_tickers",
         mock_load_data,
     )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.run_optimisation",
+        mock_run_optimisation,
+    )
 
     start_date = datetime.date(2020, 1, 1)
     end_date = datetime.date(2020, 12, 31)
-    strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    strategy_params = {
+        "window": range(10, 31),
+        "entry_z_score": [1.5, 2.0, 2.5],
+        "exit_z_score": [0.3, 0.5, 0.7],
+    }
 
     data, ticker_display, optimised_params = (
         prepare_pairs_trading_strategy_with_optimisation(
@@ -266,6 +280,9 @@ def test_handle_pairs_trading_optimisation(monkeypatch):
     assert ticker_display == "AAPL vs. GOOGL"
     assert isinstance(optimised_params, dict)
     assert set(optimised_params.keys()) == set(strategy_params.keys())
+    assert optimised_params["window"] == 20
+    assert optimised_params["entry_z_score"] == 2.0
+    assert optimised_params["exit_z_score"] == 0.5
 
 
 def test_run_optimisation(monkeypatch):
@@ -284,9 +301,15 @@ def test_run_optimisation(monkeypatch):
     initial_params = {"window": 20, "std_dev": 2.0}
     start_date = datetime.date(2020, 1, 1)
     end_date = datetime.date(2020, 12, 31)
+    ticker = "AAPL"
 
     optimised_params, metrics = run_optimisation(
-        mock_polars_data, strategy_type, initial_params, start_date, end_date
+        mock_polars_data,
+        strategy_type,
+        initial_params,
+        start_date,
+        end_date,
+        ticker,
     )
 
     assert isinstance(optimised_params, dict)
@@ -296,15 +319,22 @@ def test_run_optimisation(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "strategy_type,params",
+    "strategy_type,params,tickers",
     [
-        ("Moving Average Crossover", {"short_window": 5, "long_window": 20}),
-        ("Mean Reversion", {"window": 5, "std_dev": 2.0}),
-        ("Pairs Trading", {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}),
+        ("Moving Average Crossover", {"short_window": 5, "long_window": 20}, "AAPL"),
+        ("Mean Reversion", {"window": 5, "std_dev": 2.0}, "AAPL"),
+        (
+            "Pairs Trading",
+            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+            ["AAPL", "GOOGL"],
+        ),
     ],
 )
 def test_run_backtest(
-    mock_polars_data: pl.DataFrame, strategy_type: str, params: dict[str, Any]
+    mock_polars_data: pl.DataFrame,
+    strategy_type: str,
+    params: dict[str, Any],
+    tickers: str | list[str],
 ) -> None:
     # Ensure mock_polars_data has a Date column
     if "Date" not in mock_polars_data.columns:
@@ -328,7 +358,7 @@ def test_run_backtest(
     elif "Close" not in mock_polars_data.columns:
         mock_polars_data = mock_polars_data.with_columns(pl.col("Open").alias("Close"))
 
-    results, metrics = run_backtest(mock_polars_data, strategy_type, params)
+    results, metrics = run_backtest(mock_polars_data, strategy_type, params, tickers)
     assert isinstance(results, pl.DataFrame)
     assert isinstance(metrics, dict)
     EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
@@ -338,7 +368,7 @@ def test_run_backtest(
 
 def test_run_backtest_invalid_strategy() -> None:
     with pytest.raises(ValueError, match="Invalid strategy type"):
-        run_backtest(pl.DataFrame(), "Invalid Strategy", {})
+        run_backtest(pl.DataFrame(), "Invalid Strategy", {}, "AAPL")
 
 
 def test_optimise_single_ticker_strategy_ticker(monkeypatch):

@@ -10,17 +10,20 @@ For instructions on how to run the application, refer to the README.md.
 """
 
 import datetime
+import json
 import time
 from typing import Any, cast
 
 import polars as pl
 import streamlit as st
+
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
+from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
@@ -147,7 +150,8 @@ def prepare_single_ticker_strategy_with_optimisation(
         best_params, _ = optimise_strategy_params(
             data,
             strategy_type,
-            cast(dict[str, range] | dict[str, list[float]], strategy_params),
+            cast(dict[str, range | list[int | float]], strategy_params),
+            best_ticker,
         )
     else:
         best_params = {
@@ -235,6 +239,16 @@ def prepare_pairs_trading_strategy_with_optimisation(
     data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
     ticker_display = f"{ticker1} vs. {ticker2}"
 
+    if optimise:
+        strategy_params, _ = run_optimisation(
+            data,
+            "Pairs Trading",
+            strategy_params,
+            start_date,
+            end_date,
+            [ticker1, ticker2],
+        )
+
     return data, ticker_display, strategy_params
 
 
@@ -271,7 +285,12 @@ def prepare_pairs_trading_strategy_without_optimisation(
 
     if optimise:
         strategy_params, _ = run_optimisation(
-            data, "Pairs Trading", strategy_params, start_date, end_date
+            data,
+            "Pairs Trading",
+            strategy_params,
+            start_date,
+            end_date,
+            [ticker1, ticker2],
         )
 
     return data, ticker_display, strategy_params
@@ -311,7 +330,7 @@ def prepare_single_ticker_strategy(
 
     if optimise and strategy_type != "Buy and Hold":
         strategy_params, _ = run_optimisation(
-            data, strategy_type, strategy_params, start_date, end_date
+            data, strategy_type, strategy_params, start_date, end_date, ticker
         )
     elif optimise and strategy_type == "Buy and Hold":
         top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
@@ -323,6 +342,76 @@ def prepare_single_ticker_strategy(
         data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
 
     return data, ticker_display, strategy_params
+
+
+def display_historical_results():
+    """
+    Displays historical strategy results from the database in an organised
+    format, showing only the most recent entry for each unique strategy.
+    """
+    session = Session()
+    strategies = (
+        session.query(StrategyModel).order_by(StrategyModel.date_created.desc()).all()
+    )
+    session.close()
+
+    if not strategies:
+        st.info("No historical strategy results available.")
+        return
+
+    st.header("Historical Strategy Results")
+
+    # Group strategies by name and parameters
+    unique_strategies = {}
+    for strategy in strategies:
+        # Handle cases where parameters might be a string or a dict
+        if isinstance(strategy.parameters, str):
+            params = json.loads(strategy.parameters)
+        else:
+            params = strategy.parameters
+
+        # Handle cases where tickers might be a string or a list
+        if isinstance(strategy.tickers, str):
+            tickers = json.loads(strategy.tickers)
+        else:
+            tickers = strategy.tickers
+
+        key = (strategy.name, frozenset(params.items()))
+        if key not in unique_strategies:
+            unique_strategies[key] = (strategy, tickers)
+
+    # Display only the most recent entry for each unique strategy
+    for (strategy_name, params), (strategy, tickers) in unique_strategies.items():
+        ticker_display = " vs. ".join(tickers) if isinstance(tickers, list) else tickers
+        with st.expander(
+            f"{strategy_name} - {ticker_display} - {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
+        ):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.subheader("Strategy Details")
+                st.write(f"**Strategy Type:** {strategy_name}")
+                st.write(f"**Ticker(s):** {ticker_display}")
+                st.write(
+                    f"**Date Created:** {strategy.date_created.strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                st.write(f"**Start Date:** {strategy.start_date}")
+                st.write(f"**End Date:** {strategy.end_date}")
+
+                st.subheader("Parameters")
+                for key, value in dict(params).items():
+                    st.write(f"**{key}:** {value}")
+
+            with col2:
+                st.subheader("Performance Metrics")
+                st.write(f"**Total Return:** {strategy.total_return:.2%}")
+                if strategy.sharpe_ratio:
+                    st.write(f"**Sharpe Ratio:** {strategy.sharpe_ratio:.2f}")
+                else:
+                    st.write("**Sharpe Ratio:** N/A")
+                st.write(f"**Max Drawdown:** {strategy.max_drawdown:.2%}")
+
+            st.write("---")
 
 
 def main():
@@ -401,7 +490,13 @@ def main():
         company_display = company_name1
 
     # Run the backtest and display the results
-    results, metrics = run_backtest(data, strategy_type, strategy_params)
+    tickers = (
+        ticker_display.split(" vs. ")
+        if strategy_type == "Pairs Trading"
+        else ticker_display
+    )
+    results, metrics = run_backtest(data, strategy_type, strategy_params, tickers)
+
     display_performance_metrics(metrics, company_display)
     plot_equity_curve(results, ticker_display, company_display)
     plot_strategy_returns(results, ticker_display, company_display)
@@ -414,6 +509,9 @@ def main():
         use_container_width=True,
         hide_index=True,
     )
+
+    # Display historical results
+    display_historical_results()
 
 
 if __name__ == "__main__":

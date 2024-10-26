@@ -5,6 +5,9 @@ Contains pytest fixtures for tests, such as mock data.
 import pandas as pd
 import polars as pl
 import pytest
+from quant_trading_strategy_backtester.models import Base
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
@@ -51,3 +54,19 @@ def mock_yfinance_pairs_data() -> pd.DataFrame:
 @pytest.fixture
 def mock_polars_pairs_data(mock_yfinance_pairs_data: pd.DataFrame) -> pl.DataFrame:
     return pl.from_pandas(mock_yfinance_pairs_data)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def mock_db_session(monkeypatch):
+    def mock_session():
+        return session
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    TestingSessionLocal = sessionmaker(bind=engine)
+    session = TestingSessionLocal()
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.models.Session", mock_session
+    )
+    yield session
+    session.close()

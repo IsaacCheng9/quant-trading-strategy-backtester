@@ -7,8 +7,14 @@ designed to work with the strategy templates defined in a different module in
 this repository.
 """
 
+import json
+from datetime import date
+
 import polars as pl
-from quant_trading_strategy_backtester.strategies.base import Strategy
+
+from quant_trading_strategy_backtester.models import Session
+from quant_trading_strategy_backtester.models import StrategyModel as StrategyModel
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
 class Backtester:
@@ -23,28 +29,37 @@ class Backtester:
         strategy: The trading strategy to backtest.
         initial_capital: The initial capital for the backtest.
         results: The results of the backtest (initialised after running).
+        tickers: The ticker or tickers used in the backtest.
     """
 
     def __init__(
-        self, data: pl.DataFrame, strategy: Strategy, initial_capital: float = 100000.0
+        self,
+        data: pl.DataFrame,
+        strategy: BaseStrategy,
+        initial_capital: float = 100000.0,
+        session=None,
+        tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data
         self.strategy = strategy
         self.initial_capital = initial_capital
-        self.results = None
+        self.results: None | pl.DataFrame = None
+        self.session = session or Session()
+        self.tickers = tickers
 
     def run(self) -> pl.DataFrame:
         """
         Runs the backtest.
 
         Generates trading signals using the strategy, calculates returns,
-        and stores the results.
+        stores the results, and saves them to the database.
 
         Returns:
             A DataFrame containing the backtest results.
         """
         signals = self.strategy.generate_signals(self.data)
         self.results = self._calculate_returns(signals)
+        self.save_results()
         return self.results
 
     def _calculate_returns(self, signals: pl.DataFrame) -> pl.DataFrame:
@@ -123,13 +138,16 @@ class Backtester:
         if self.results is None:
             return None
 
-        total_return = self.results["cumulative_returns"].tail(1)[0] - 1
+        total_return = (
+            float(self.results["cumulative_returns"].cast(pl.Float64).tail(1).item())
+            - 1
+        )
 
         # Measure the risk-adjusted return, assuming 252 trading days per year.
-        returns_mean = self.results["strategy_returns"].mean()
-        returns_std = self.results["strategy_returns"].std()
-        if returns_std != 0 and not pl.Series([returns_std]).is_nan()[0]:
-            sharpe_ratio = (252**0.5) * returns_mean / returns_std
+        returns_mean = float(self.results["strategy_returns"].cast(pl.Float64).mean())  # type: ignore
+        returns_std = float(self.results["strategy_returns"].cast(pl.Float64).std())  # type: ignore
+        if returns_std != 0:
+            sharpe_ratio = float((252**0.5) * returns_mean / returns_std)
         else:
             sharpe_ratio = float("nan")
 
@@ -137,10 +155,79 @@ class Backtester:
         drawdowns = (
             self.results["equity_curve"] / self.results["equity_curve"].cum_max() - 1
         )
-        max_drawdown = drawdowns.min()
+        max_drawdown = float(drawdowns.cast(pl.Float64).min())  # type: ignore
 
         return {
             "Total Return": total_return,
             "Sharpe Ratio": sharpe_ratio,
             "Max Drawdown": max_drawdown,
         }
+
+    def save_results(self) -> None:
+        """
+        Saves the strategy and its backtest results to the database if not already present.
+        """
+        metrics = self.get_performance_metrics()
+        if metrics is None:
+            raise ValueError("Backtest hasn't been run yet. Call run() first.")
+
+        strategy_params = self.strategy.get_parameters()
+        strategy_name = self.strategy.__class__.__name__
+
+        # Extract tickers from data columns if not provided
+        if self.tickers is None:
+            if "Close_1" in self.data.columns and "Close_2" in self.data.columns:
+                pass
+            else:
+                pass
+
+        # Determine start and end dates
+        start_date_row = self.data.select(
+            pl.col("Date").dt.year().alias("year"),
+            pl.col("Date").dt.month().alias("month"),
+            pl.col("Date").dt.day().alias("day"),
+        ).row(0)
+        end_date_row = self.data.select(
+            pl.col("Date").dt.year().alias("year"),
+            pl.col("Date").dt.month().alias("month"),
+            pl.col("Date").dt.day().alias("day"),
+        ).row(-1)
+
+        start_date = date(start_date_row[0], start_date_row[1], start_date_row[2])
+        end_date = date(end_date_row[0], end_date_row[1], end_date_row[2])
+
+        try:
+            # Check if a strategy with the same name, parameters, and date
+            # range already exists
+            existing_strategy = (
+                self.session.query(StrategyModel)
+                .filter_by(
+                    name=strategy_name,
+                    parameters=json.dumps(strategy_params),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                .first()
+            )
+
+            if existing_strategy is None:
+                new_strategy = StrategyModel(
+                    name=strategy_name,
+                    parameters=json.dumps(strategy_params),
+                    total_return=metrics["Total Return"],
+                    sharpe_ratio=metrics["Sharpe Ratio"],
+                    max_drawdown=metrics["Max Drawdown"],
+                    tickers=json.dumps(self.tickers),
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+                self.session.add(new_strategy)
+                self.session.commit()
+                print(f"Strategy {strategy_name} saved successfully.")
+            else:
+                print(
+                    f"Strategy {strategy_name} with same parameters already exists. Skipping save."
+                )
+        except Exception as e:
+            self.session.rollback()
+            raise ValueError(f"Failed to save strategy results: {str(e)}")
