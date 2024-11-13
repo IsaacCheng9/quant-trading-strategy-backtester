@@ -11,6 +11,28 @@ metrics. Developed with Python.
 _Try the deployed app
 [here!](https://quant-trading-strategy-backtester.streamlit.app/)_
 
+## Screenshots
+
+<!-- markdownlint-disable-next-line MD033 -->
+<details>
+<!-- markdownlint-disable-next-line MD033 -->
+<summary>Pairs Trading without Optimisation</summary>
+
+![Pairs Trading without Optimisation](./resources/screenshots/pairs_trading_no_optimisation.png)
+
+</details>
+
+<!-- markdownlint-disable-next-line MD033 -->
+<details>
+<!-- markdownlint-disable-next-line MD033 -->
+<summary>Pairs Trading with Strategy Parameter Optimisation</summary>
+
+![Pairs Trading ](./resources/screenshots/pairs_trading_optimised_strategy_parameters_1.png)
+
+![Pairs Trading without Optimisation](./resources/screenshots/pairs_trading_optimised_strategy_parameters_2.png)
+
+</details>
+
 ## Trading Strategies Supported
 
 - Buy and Hold
