@@ -36,7 +36,7 @@ class StrategyModel(Base):
     __tablename__ = "strategies"
 
     id = Column(Integer, primary_key=True)
-    date_created = Column(DateTime, default=datetime.datetime.now())
+    date_created = Column(DateTime, default=datetime.datetime.now)
     name = Column(String, nullable=False)
     parameters = Column(JSON, nullable=False)
     total_return = Column(Float, nullable=False)
