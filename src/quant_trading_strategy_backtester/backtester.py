@@ -8,13 +8,23 @@ this repository.
 """
 
 import json
-from datetime import date
+import os
+from datetime import date, datetime
 
 import polars as pl
+import streamlit as st
 
 from quant_trading_strategy_backtester.models import Session
 from quant_trading_strategy_backtester.models import StrategyModel as StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+
+
+def is_running_locally() -> bool:
+    """
+    Determines if the app is running locally or on Streamlit Cloud.
+    """
+    # This environment variable is present in Streamlit Cloud
+    return not os.getenv("STREAMLIT_SHARING_MODE", None) == "streamlit"
 
 
 class Backtester:
@@ -165,7 +175,8 @@ class Backtester:
 
     def save_results(self) -> None:
         """
-        Saves the strategy and its backtest results to the database if not already present.
+        Saves the strategy and its backtest results to either the local database
+        or session state, depending on the environment.
         """
         metrics = self.get_performance_metrics()
         if metrics is None:
@@ -196,38 +207,58 @@ class Backtester:
         start_date = date(start_date_row[0], start_date_row[1], start_date_row[2])
         end_date = date(end_date_row[0], end_date_row[1], end_date_row[2])
 
-        try:
-            # Check if a strategy with the same name, parameters, and date
-            # range already exists
-            existing_strategy = (
-                self.session.query(StrategyModel)
-                .filter_by(
-                    name=strategy_name,
-                    parameters=json.dumps(strategy_params),
-                    start_date=start_date,
-                    end_date=end_date,
+        if is_running_locally():
+            try:
+                # Check if a strategy with the same name, parameters, and date
+                # range already exists
+                existing_strategy = (
+                    self.session.query(StrategyModel)
+                    .filter_by(
+                        name=strategy_name,
+                        parameters=json.dumps(strategy_params),
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                    .first()
                 )
-                .first()
-            )
 
-            if existing_strategy is None:
-                new_strategy = StrategyModel(
-                    name=strategy_name,
-                    parameters=json.dumps(strategy_params),
-                    total_return=metrics["Total Return"],
-                    sharpe_ratio=metrics["Sharpe Ratio"],
-                    max_drawdown=metrics["Max Drawdown"],
-                    tickers=json.dumps(self.tickers),
-                    start_date=start_date,
-                    end_date=end_date,
-                )
-                self.session.add(new_strategy)
-                self.session.commit()
-                print(f"Strategy {strategy_name} saved successfully.")
-            else:
-                print(
-                    f"Strategy {strategy_name} with same parameters already exists. Skipping save."
-                )
-        except Exception as e:
-            self.session.rollback()
-            raise ValueError(f"Failed to save strategy results: {str(e)}")
+                if existing_strategy is None:
+                    new_strategy = StrategyModel(
+                        name=strategy_name,
+                        parameters=json.dumps(strategy_params),
+                        total_return=metrics["Total Return"],
+                        sharpe_ratio=metrics["Sharpe Ratio"],
+                        max_drawdown=metrics["Max Drawdown"],
+                        tickers=json.dumps(self.tickers),
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
+                    self.session.add(new_strategy)
+                    self.session.commit()
+                    print(f"Strategy {strategy_name} saved successfully.")
+                else:
+                    print(
+                        f"Strategy {strategy_name} with same parameters already exists. Skipping save."
+                    )
+            except Exception as e:
+                self.session.rollback()
+                raise ValueError(f"Failed to save strategy results: {str(e)}")
+        else:
+            # Use Streamlit session state for cloud deployment
+            if "strategy_results" not in st.session_state:
+                st.session_state.strategy_results = []
+
+            st.session_state.strategy_results.append(
+                {
+                    "date_created": datetime.now(),
+                    "name": strategy_name,
+                    "parameters": strategy_params,
+                    "total_return": metrics["Total Return"],
+                    "sharpe_ratio": metrics["Sharpe Ratio"],
+                    "max_drawdown": metrics["Max Drawdown"],
+                    "tickers": self.tickers,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+            )
+            print(f"Strategy {strategy_name} saved to session state.")
