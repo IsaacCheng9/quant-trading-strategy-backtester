@@ -8,7 +8,7 @@ this repository.
 """
 
 import json
-import os
+import platform
 from datetime import date, datetime
 
 import polars as pl
@@ -21,10 +21,14 @@ from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 def is_running_locally() -> bool:
     """
-    Determines if the app is running locally or on Streamlit Cloud.
+    Determines if the app is running locally or on Streamlit Cloud by checking
+    platform characteristics. platform.processor() returns nothing on Streamlit
+    Cloud but returns a value locally.
+
+    Returns:
+        bool: True if running locally, False if running on Streamlit Cloud
     """
-    # This environment variable is present in Streamlit Cloud
-    return not os.getenv("STREAMLIT_SHARING_MODE", None) == "streamlit"
+    return bool(platform.processor())
 
 
 class Backtester:
