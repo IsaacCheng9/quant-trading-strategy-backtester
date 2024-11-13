@@ -13,15 +13,8 @@ _Try the deployed app
 
 ## Screenshots
 
-<!-- markdownlint-disable-next-line MD033 -->
-<details>
-<!-- markdownlint-disable-next-line MD033 -->
-<summary>Pairs Trading without Optimisation</summary>
-
 ![Pairs Trading without Optimisation 1](./resources/screenshots/pairs_trading_no_optimisation_1.png)
 ![Pairs Trading without Optimisation 2](./resources/screenshots/pairs_trading_no_optimisation_2.png)
-
-</details>
 
 <!-- markdownlint-disable-next-line MD033 -->
 <details>
