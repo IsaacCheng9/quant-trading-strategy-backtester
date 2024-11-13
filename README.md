@@ -18,7 +18,8 @@ _Try the deployed app
 <!-- markdownlint-disable-next-line MD033 -->
 <summary>Pairs Trading without Optimisation</summary>
 
-![Pairs Trading without Optimisation](./resources/screenshots/pairs_trading_no_optimisation.png)
+![Pairs Trading without Optimisation 1](./resources/screenshots/pairs_trading_no_optimisation_1.png)
+![Pairs Trading without Optimisation 2](./resources/screenshots/pairs_trading_no_optimisation_2.png)
 
 </details>
 
@@ -27,9 +28,7 @@ _Try the deployed app
 <!-- markdownlint-disable-next-line MD033 -->
 <summary>Pairs Trading with Strategy Parameter Optimisation</summary>
 
-![Pairs Trading ](./resources/screenshots/pairs_trading_optimised_strategy_parameters_1.png)
-
-![Pairs Trading without Optimisation](./resources/screenshots/pairs_trading_optimised_strategy_parameters_2.png)
+![Pairs Trading ](./resources/screenshots/pairs_trading_optimised_strategy_parameters.png)
 
 </details>
 
