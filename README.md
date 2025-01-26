@@ -89,3 +89,6 @@ Alternatively, run it directly with uv (skipping the Poe alias):
 ```bash
 uv run streamlit run src/quant_trading_strategy_backtester/app.py
 ```
+
+Note that you may encounter rate limiting issues with Yahoo Finance resulting in
+slow data fetches– unfortunately this is out of my control.

@@ -89,10 +89,10 @@ class PairsTradingStrategy(BaseStrategy):
         signals = signals.with_columns(
             [
                 pl.col("spread")
-                .rolling_mean(window_size=self.window, min_periods=1)
+                .rolling_mean(window_size=self.window, min_periods=self.window)
                 .alias("spread_mean"),
                 pl.col("spread")
-                .rolling_std(window_size=self.window, min_periods=1)
+                .rolling_std(window_size=self.window, min_periods=self.window)
                 .alias("spread_std"),
             ]
         )

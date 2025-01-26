@@ -60,10 +60,14 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
         signals = signals.with_columns(
             [
                 pl.col("Close")
-                .rolling_mean(window_size=self.short_window, min_periods=1)
+                .rolling_mean(
+                    window_size=self.short_window, min_periods=self.short_window
+                )
                 .alias("short_mavg"),
                 pl.col("Close")
-                .rolling_mean(window_size=self.long_window, min_periods=1)
+                .rolling_mean(
+                    window_size=self.long_window, min_periods=self.long_window
+                )
                 .alias("long_mavg"),
                 pl.lit(0.0).alias("signal"),
             ]

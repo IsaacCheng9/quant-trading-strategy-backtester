@@ -2,6 +2,7 @@
 Implements the mean reversion strategy, which is based on the assumption
 that asset prices tend to revert to their mean over time.
 """
+
 from typing import Any
 
 import polars as pl
@@ -64,10 +65,10 @@ class MeanReversionStrategy(BaseStrategy):
         signals = signals.with_columns(
             [
                 pl.col("Close")
-                .rolling_mean(window_size=self.window, min_periods=1)
+                .rolling_mean(window_size=self.window, min_periods=self.window)
                 .alias("mean"),
                 pl.col("Close")
-                .rolling_std(window_size=self.window, min_periods=1)
+                .rolling_std(window_size=self.window, min_periods=self.window)
                 .alias("std"),
             ]
         )
