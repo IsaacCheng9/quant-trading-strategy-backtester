@@ -70,3 +70,68 @@ def mock_db_session(monkeypatch):
     )
     yield session
     session.close()
+
+
+@pytest.fixture(autouse=True)
+def mock_yfinance_functions(monkeypatch):
+    def mock_load_one_ticker(*args, **kwargs):
+        dates = pd.date_range(start="1/1/2020", end="1/31/2020")
+        return pl.DataFrame(
+            {"Date": dates, "Close": [100.0 + i for i in range(len(dates))]}
+        )
+
+    def mock_load_two_tickers(*args, **kwargs):
+        dates = pd.date_range(start="1/1/2020", end="1/31/2020")
+        return pl.DataFrame(
+            {
+                "Date": dates,
+                "Close_1": [100.0 + i * 0.1 for i in range(len(dates))],
+                "Close_2": [100.0 + i * 0.05 for i in range(len(dates))],
+            }
+        )
+
+    # Mock all potential yfinance data loading functions
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.data.load_yfinance_data_one_ticker",
+        mock_load_one_ticker,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.data.load_yfinance_data_two_tickers",
+        mock_load_two_tickers,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
+        mock_load_one_ticker,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_two_tickers",
+        mock_load_two_tickers,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_one_ticker",
+        mock_load_one_ticker,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
+        mock_load_two_tickers,
+    )
+
+
+@pytest.fixture(autouse=True)
+def mock_yfinance_download(monkeypatch):
+    def mock_download(*args, **kwargs):
+        return pd.DataFrame(
+            {
+                "Date": pd.date_range(start="2020-01-01", end="2020-12-31"),
+                "Close": [100 + i * 0.1 for i in range(365)],
+                "Adj Close": [100 + i * 0.1 for i in range(365)],
+                "Volume": [1000000 for _ in range(365)],
+            }
+        ).set_index("Date")
+
+    # Mock all potential network-related functions
+    monkeypatch.setattr("yfinance.download", mock_download)
+    monkeypatch.setattr(
+        "yfinance.Ticker",
+        lambda x: type("MockTicker", (), {"history": lambda **kwargs: mock_download()}),
+    )
