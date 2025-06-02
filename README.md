@@ -81,16 +81,12 @@ uv sync --all-extras --dev
 Run the following command from the [project root](./) directory:
 
 ```bash
-poe app
-```
-
-Alternatively, run it directly with uv (skipping the Poe alias):
-
-```bash
 uv run streamlit run src/quant_trading_strategy_backtester/app.py
 ```
 
+### Rate Limiting Issues with Yahoo Finance
+
 Note that you may encounter rate limiting issues with Yahoo Finance resulting in
 slow data fetches in the app – unfortunately this is out of my control. You
-could work around this by using a VPN, or waiting for a while before trying
-again.
+could work around this by using a VPN, or wait for a while before trying again.
+Sometimes upgrading the `yfinance` package to the latest version can also help.
