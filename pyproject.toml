@@ -15,6 +15,7 @@ dependencies = [
     "plotly<6.0.0,>=5.23.0",
     "polars<2.0.0,>=1.10.0",
     "sqlalchemy<3.0.0,>=2.0.35",
+    "lxml>=5.4.0",
 ]
 
 [build-system]
