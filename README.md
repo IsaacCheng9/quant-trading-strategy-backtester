@@ -81,12 +81,6 @@ uv sync --all-extras --dev
 Run the following command from the [project root](./) directory:
 
 ```bash
-poe app
-```
-
-Alternatively, run it directly with uv (skipping the Poe alias):
-
-```bash
 uv run streamlit run src/quant_trading_strategy_backtester/app.py
 ```
 
