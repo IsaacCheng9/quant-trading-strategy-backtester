@@ -104,8 +104,9 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
         cap.
     """
     # Fetch the list of S&P 500 companies from the Wikipedia table.
-    SOURCE = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    sp500_constituents = pd.read_html(SOURCE)[0]
+    WIKIPEDIA_SOURCE = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    # Use beautifulsoup4 to parse the HTML for reliability.
+    sp500_constituents = pd.read_html(WIKIPEDIA_SOURCE, flavor="bs4")[0]
     tickers = sp500_constituents["Symbol"].to_list()
 
     # Fetch market cap data with threading for faster execution.
