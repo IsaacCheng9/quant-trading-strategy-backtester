@@ -138,12 +138,19 @@ class Backtester:
 
         return portfolio
 
-    def get_performance_metrics(self) -> dict[str, float] | None:
+    def get_performance_metrics(
+        self, risk_free_return_rate_daily: float = 0.02 / 252
+    ) -> dict[str, float] | None:
         """
         Calculates key performance metrics from the trading strategy backtest.
 
         Computes the total return, Sharpe ratio, and maximum drawdown based on
         the backtest results.
+
+        Args:
+            - risk_free_return_rate_daily: The risk-free rate of return.
+                Defaults to 2% per annum, as it's the target inflation rate for
+                most central banks.
 
         Returns:
             A dictionary containing performance metrics, or None if the
@@ -164,7 +171,9 @@ class Backtester:
             # Convert daily Sharpe ratio to annual. Returns scale linearly
             # (* 252), but volatility scales with sqrt(time), so we multiply by
             # sqrt(252).
-            sharpe_ratio = float((252**0.5) * returns_mean / returns_std)
+            sharpe_ratio = float(
+                (252**0.5) * (returns_mean - risk_free_return_rate_daily) / returns_std
+            )
         else:
             sharpe_ratio = float("nan")
 
