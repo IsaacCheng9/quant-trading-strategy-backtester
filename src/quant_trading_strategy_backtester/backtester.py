@@ -164,18 +164,16 @@ class Backtester:
         )
 
         # Measure the risk-adjusted return, assuming 252 trading days per year.
-        returns_mean = float(self.results["strategy_returns"].cast(pl.Float64).mean())  # type: ignore
-        returns_std = float(self.results["strategy_returns"].cast(pl.Float64).std())  # type: ignore
-        risk_free_return_rate_daily = risk_free_return_rate_annual / 252
-        if returns_std != 0:
-            # Convert daily Sharpe ratio to annual. Returns scale linearly
-            # (* 252), but volatility scales with sqrt(time), so we multiply by
-            # sqrt(252).
-            sharpe_ratio = float(
-                (252**0.5) * (returns_mean - risk_free_return_rate_daily) / returns_std
-            )
-        else:
-            sharpe_ratio = float("nan")
+        periods = 252
+        rf_daily = (1 + risk_free_return_rate_annual) ** (1 / periods) - 1
+        excess = self.results["strategy_returns"].cast(pl.Float64) - rf_daily
+        returns_mean = float(excess.mean())
+        returns_std = float(excess.std())
+        sharpe_ratio = (
+            float((periods**0.5) * returns_mean / returns_std)
+            if returns_std
+            else float("nan")
+        )
 
         # Measure the maximum loss from a peak to a trough of the equity curve.
         drawdowns = (
