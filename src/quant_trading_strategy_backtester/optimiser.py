@@ -360,9 +360,9 @@ def run_backtest(
     backtester = Backtester(data, strategy, tickers=tickers)
     results = backtester.run()
     metrics = backtester.get_performance_metrics()
-    assert (
-        metrics is not None
-    ), "No results available for the selected ticker and date range"
+    assert metrics is not None, (
+        "No results available for the selected ticker and date range"
+    )
 
     return results, metrics
 

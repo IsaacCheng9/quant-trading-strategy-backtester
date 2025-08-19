@@ -1,6 +1,7 @@
 """
 Tests for the Pairs Trading strategy class.
 """
+
 from datetime import date, timedelta
 
 import polars as pl
@@ -140,7 +141,7 @@ def test_pairs_trading_strategy_with_mock_polars_data():
     assert signals["positions"].abs().sum() > 0, "No position changes"
 
     # Check if the spread and z-score are calculated correctly
-    assert (
-        signals["spread"] == signals["Close_1"] - signals["Close_2"]
-    ).all(), "Spread calculation is incorrect"
+    assert (signals["spread"] == signals["Close_1"] - signals["Close_2"]).all(), (
+        "Spread calculation is incorrect"
+    )
     assert signals["z_score"].null_count() == 0, "Z-score contains null values"

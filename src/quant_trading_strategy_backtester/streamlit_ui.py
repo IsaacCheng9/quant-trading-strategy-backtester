@@ -14,9 +14,9 @@ from quant_trading_strategy_backtester.utils import (
 )
 
 
-def get_user_inputs_except_strategy_params() -> (
-    tuple[str | tuple[str, str] | None, datetime.date, datetime.date, str, bool]
-):
+def get_user_inputs_except_strategy_params() -> tuple[
+    str | tuple[str, str] | None, datetime.date, datetime.date, str, bool
+]:
     """
     Gets user inputs besides strategy parameters from the Streamlit sidebar.
 

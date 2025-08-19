@@ -1,6 +1,7 @@
 """
 Tests for the Mean Reversion strategy class.
 """
+
 import polars as pl
 from quant_trading_strategy_backtester.strategies.mean_reversion import (
     MeanReversionStrategy,

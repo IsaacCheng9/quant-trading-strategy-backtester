@@ -1,6 +1,7 @@
 """
 Tests for the Moving Average Crossover strategy class.
 """
+
 from datetime import date, timedelta
 
 import polars as pl
@@ -65,9 +66,9 @@ def test_moving_average_crossover_strategy_with_mock_polars_data():
     ).select("Date")
     assert len(crossover_indices) > 0, "No crossover detected"
     crossover_index = crossover_indices.row(0)[0]
-    assert (
-        signals.filter(pl.col("Date") == crossover_index)["signal"].item() == 1.0
-    ), "Buy signal not generated at crossover"
+    assert signals.filter(pl.col("Date") == crossover_index)["signal"].item() == 1.0, (
+        "Buy signal not generated at crossover"
+    )
 
     # Check if the strategy generates a sell signal when short MA crosses below long MA
     crossunder_indices = signals.filter(
@@ -75,9 +76,9 @@ def test_moving_average_crossover_strategy_with_mock_polars_data():
     ).select("Date")
     assert len(crossunder_indices) > 0, "No crossunder detected"
     crossunder_index = crossunder_indices.row(-1)[0]
-    assert (
-        signals.filter(pl.col("Date") == crossunder_index)["signal"].item() == 0.0
-    ), "Sell signal not generated at crossunder"
+    assert signals.filter(pl.col("Date") == crossunder_index)["signal"].item() == 0.0, (
+        "Sell signal not generated at crossunder"
+    )
 
     # Check if positions are calculated correctly
     non_zero_positions = signals.filter(pl.col("positions") != 0)

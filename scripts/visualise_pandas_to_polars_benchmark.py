@@ -46,11 +46,11 @@ def visualise_benchmark_times(
     polars_times, polars_mean, polars_std = load_and_process_benchmark_data(polars_csv)
 
     # Ensure that the number of runs is equal for fairness
-    assert len(pandas_times) == len(
-        polars_times
-    ), "Different number of runs for pandas and Polars benchmarks"
+    assert len(pandas_times) == len(polars_times), (
+        "Different number of runs for pandas and Polars benchmarks"
+    )
     num_runs = len(pandas_times)
-    run_num_labels = [f"Run {i+1}" for i in range(num_runs)]
+    run_num_labels = [f"Run {i + 1}" for i in range(num_runs)]
 
     # Calculate average speed-up
     avg_speedup = (pandas_mean / polars_mean - 1) * 100
@@ -95,14 +95,14 @@ def visualise_benchmark_times(
     # Add value labels on top of each bar
     for i in range(num_runs):
         fig.add_annotation(
-            x=f"Run {i+1}",
+            x=f"Run {i + 1}",
             y=pandas_times[i],
             text=f"{pandas_times[i]:.4f}",
             showarrow=False,
             yshift=10,
         )
         fig.add_annotation(
-            x=f"Run {i+1}",
+            x=f"Run {i + 1}",
             y=polars_times[i],
             text=f"{polars_times[i]:.4f}",
             showarrow=False,

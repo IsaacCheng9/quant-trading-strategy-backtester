@@ -1,6 +1,7 @@
 """
 Tests for the Buy and Hold strategy class.
 """
+
 from datetime import date, timedelta
 
 import polars as pl
