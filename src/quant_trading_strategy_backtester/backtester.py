@@ -138,16 +138,22 @@ class Backtester:
 
         return portfolio
 
-    def get_performance_metrics(self) -> dict[str, float] | None:
+    def get_performance_metrics(
+        self, risk_free_return_rate_annual: float = 0.0
+    ) -> dict[str, float] | None:
         """
         Calculates key performance metrics from the trading strategy backtest.
 
         Computes the total return, Sharpe ratio, and maximum drawdown based on
         the backtest results.
 
+        Args:
+            - risk_free_return_rate_annual: The risk-free rate of return
+                annualised. Defaults to 0.0% per annum for simplicity.
+
         Returns:
-            A dictionary containing performance metrics, or None if the backtest
-            hasn't been run yet.
+            A dictionary containing performance metrics, or None if the
+            backtest hasn't been run yet.
         """
         if self.results is None:
             return None
@@ -158,12 +164,16 @@ class Backtester:
         )
 
         # Measure the risk-adjusted return, assuming 252 trading days per year.
-        returns_mean = float(self.results["strategy_returns"].cast(pl.Float64).mean())  # type: ignore
-        returns_std = float(self.results["strategy_returns"].cast(pl.Float64).std())  # type: ignore
-        if returns_std != 0:
-            sharpe_ratio = float((252**0.5) * returns_mean / returns_std)
-        else:
-            sharpe_ratio = float("nan")
+        periods = 252
+        rf_daily = (1 + risk_free_return_rate_annual) ** (1 / periods) - 1
+        excess = self.results["strategy_returns"].cast(pl.Float64) - rf_daily
+        returns_mean = float(excess.mean())
+        returns_std = float(excess.std())
+        sharpe_ratio = (
+            float((periods**0.5) * returns_mean / returns_std)
+            if returns_std
+            else float("nan")
+        )
 
         # Measure the maximum loss from a peak to a trough of the equity curve.
         drawdowns = (
@@ -171,6 +181,7 @@ class Backtester:
         )
         max_drawdown = float(drawdowns.cast(pl.Float64).min())  # type: ignore
 
+        # TODO: Split the calculations out into separate functions.
         return {
             "Total Return": total_return,
             "Sharpe Ratio": sharpe_ratio,
