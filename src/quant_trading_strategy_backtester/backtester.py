@@ -146,8 +146,8 @@ class Backtester:
         the backtest results.
 
         Returns:
-            A dictionary containing performance metrics, or None if the backtest
-            hasn't been run yet.
+            A dictionary containing performance metrics, or None if the
+            backtest hasn't been run yet.
         """
         if self.results is None:
             return None
@@ -161,6 +161,9 @@ class Backtester:
         returns_mean = float(self.results["strategy_returns"].cast(pl.Float64).mean())  # type: ignore
         returns_std = float(self.results["strategy_returns"].cast(pl.Float64).std())  # type: ignore
         if returns_std != 0:
+            # Convert daily Sharpe ratio to annual. Returns scale linearly
+            # (* 252), but volatility scales with sqrt(time), so we multiply by
+            # sqrt(252).
             sharpe_ratio = float((252**0.5) * returns_mean / returns_std)
         else:
             sharpe_ratio = float("nan")
