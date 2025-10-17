@@ -1,7 +1,7 @@
 [project]
 name = "quant-trading-strategy-backtester"
 description = "A quantitative trading strategy backtester with an interactive dashboard. Enables users to implement, test, and visualise trading strategies using historical market data, featuring customisable parameters and key performance metrics. Developed with Python."
-version = "0.1.3"
+version = "0.1.4"
 readme = "README.md"
 authors = [
     { name = "Isaac Cheng", email = "47993930+IsaacCheng9@users.noreply.github.com" },
@@ -41,7 +41,7 @@ dev-dependencies = [
 app = "uv run streamlit run src/quant_trading_strategy_backtester/app.py"
 
 [tool.commitizen]
-version = "0.1.3"
+version = "0.1.4"
 version_files = [
     "pyproject.toml:version",
     "pyproject.toml:tool.commitizen.version",
