@@ -36,7 +36,23 @@ def test_load_yfinance_data_two_tickers(
     monkeypatch, mock_yfinance_data: pd.DataFrame
 ) -> None:
     def mock_download(*args, **kwargs):
-        return mock_yfinance_data.set_index("Date")
+        # yfinance returns MultiIndex columns when downloading multiple
+        # tickers.
+        base_data = mock_yfinance_data.set_index("Date")
+        multi_index_data = pd.DataFrame(
+            {
+                ("Close", "AAPL"): base_data["Close"],
+                ("Close", "MSFT"): base_data["Close"],
+                ("Open", "AAPL"): base_data["Open"],
+                ("Open", "MSFT"): base_data["Open"],
+                ("High", "AAPL"): base_data["High"],
+                ("High", "MSFT"): base_data["High"],
+            }
+        )
+        multi_index_data.columns = pd.MultiIndex.from_tuples(
+            multi_index_data.columns
+        )
+        return multi_index_data
 
     monkeypatch.setattr("yfinance.download", mock_download)
 
