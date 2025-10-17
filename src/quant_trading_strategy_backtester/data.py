@@ -5,11 +5,13 @@ Yahoo Finance and Wikipedia.
 
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import cast
 
 import pandas as pd
 import polars as pl
 import streamlit as st
 import yfinance as yf
+
 from quant_trading_strategy_backtester.utils import logger
 
 
@@ -29,6 +31,7 @@ def load_yfinance_data_one_ticker(
         A Polars DataFrame containing the historical stock data.
     """
     data = yf.download(ticker, start=start_date, end=end_date)
+    data = cast(pd.DataFrame, data)
     # Handle MultiIndex columns by taking just the first level
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
@@ -54,17 +57,23 @@ def load_yfinance_data_two_tickers(
     Returns:
         A Polars DataFrame containing the historical stock data for both tickers.
     """
-    data1 = yf.download(ticker1, start=start_date, end=end_date)
-    data2 = yf.download(ticker2, start=start_date, end=end_date)
-    data1 = data1.reset_index()
-    data2 = data2.reset_index()
-    combined_data = pl.DataFrame(
-        {
-            "Date": pl.from_pandas(data1["Date"]),
-            "Close_1": pl.from_pandas(data1["Close"]),
-            "Close_2": pl.from_pandas(data2["Close"]),
-        }
-    )
+    # Download both tickers in one call for better performance.
+    data = yf.download([ticker1, ticker2], start=start_date, end=end_date)
+    data = cast(pd.DataFrame, data)
+
+    # Extract Close prices for both tickers.
+    # When downloading multiple tickers, yfinance returns MultiIndex columns.
+    if isinstance(data.columns, pd.MultiIndex):
+        # Get Close prices for each ticker.
+        close_data = data["Close"]
+        close_data = close_data.reset_index()
+        # Rename columns to match expected format.
+        close_data.columns = ["Date", "Close_1", "Close_2"]
+
+    # Convert to Polars.
+    combined_data = pl.from_pandas(close_data)
+    # Remove any rows with null values (different exchange calendars).
+    combined_data = combined_data.drop_nulls()
 
     return combined_data
 
