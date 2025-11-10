@@ -135,6 +135,6 @@ def display_returns_by_month(results: pl.DataFrame) -> None:
             monthly_returns.select(
                 ["Month (YYYY-MM)", "Monthly Return (%)", "Rolling Return (%)"]
             ).to_pandas(),
-            use_container_width=False,
+            width="content",
             hide_index=True,
         )
