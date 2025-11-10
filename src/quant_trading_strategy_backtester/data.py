@@ -31,7 +31,7 @@ def load_yfinance_data_one_ticker(
     Returns:
         A Polars DataFrame containing the historical stock data.
     """
-    data = yf.download(ticker, start=start_date, end=end_date)
+    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=False)
     data = cast(pd.DataFrame, data)
     # Handle MultiIndex columns by taking just the first level
     if isinstance(data.columns, pd.MultiIndex):
@@ -59,7 +59,9 @@ def load_yfinance_data_two_tickers(
         A Polars DataFrame containing the historical stock data for both tickers.
     """
     # Download both tickers in one call for better performance.
-    data = yf.download([ticker1, ticker2], start=start_date, end=end_date)
+    data = yf.download(
+        [ticker1, ticker2], start=start_date, end=end_date, auto_adjust=False
+    )
     data = cast(pd.DataFrame, data)
 
     # Extract Close prices for both tickers.
