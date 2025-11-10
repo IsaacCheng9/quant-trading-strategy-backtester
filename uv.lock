@@ -747,7 +747,7 @@ wheels = [
 
 [[package]]
 name = "quant-trading-strategy-backtester"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "." }
 dependencies = [
     { name = "lxml" },
@@ -755,6 +755,7 @@ dependencies = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "polars" },
+    { name = "requests" },
     { name = "sqlalchemy" },
     { name = "streamlit" },
     { name = "yfinance" },
@@ -779,6 +780,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.2.3,<3.0.0" },
     { name = "plotly", specifier = ">=5.23.0,<6.0.0" },
     { name = "polars", specifier = ">=1.10.0,<2.0.0" },
+    { name = "requests", specifier = ">=2.32.5" },
     { name = "sqlalchemy", specifier = ">=2.0.35,<3.0.0" },
     { name = "streamlit", specifier = ">=1.37.0,<2.0.0" },
     { name = "yfinance", specifier = ">=0.2.61,<1.0.0" },

@@ -539,7 +539,7 @@ def main():
     st.header(f"Raw Data for {company_display}")
     st.dataframe(
         data.to_pandas(),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
