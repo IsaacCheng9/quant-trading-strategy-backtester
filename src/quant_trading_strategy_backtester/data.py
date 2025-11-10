@@ -9,6 +9,7 @@ from typing import cast
 
 import pandas as pd
 import polars as pl
+import requests
 import streamlit as st
 import yfinance as yf
 
@@ -114,7 +115,15 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     """
     # Fetch the list of S&P 500 companies from the Wikipedia table.
     SOURCE = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    sp500_constituents = pd.read_html(SOURCE)[0]
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        )
+    }
+    response = requests.get(SOURCE, headers=headers)
+    response.raise_for_status()
+    sp500_constituents = pd.read_html(response.text)[0]
     tickers = sp500_constituents["Symbol"].to_list()
 
     # Fetch market cap data with threading for faster execution.

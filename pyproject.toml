@@ -16,6 +16,7 @@ dependencies = [
     "polars<2.0.0,>=1.10.0",
     "sqlalchemy<3.0.0,>=2.0.35",
     "lxml>=5.4.0",
+    "requests>=2.32.5",
 ]
 
 [build-system]
