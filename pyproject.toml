@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Isaac Cheng", email = "47993930+IsaacCheng9@users.noreply.github.com" },
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.13, <3.14"
 dependencies = [
     "streamlit>=1.53.0,<2.0",
     "pandas>=2.3.3,<3.0",
