@@ -112,9 +112,7 @@ class Backtester:
             [
                 pl.col("positions"),
                 asset_returns.alias("asset_returns"),
-                (pl.col("positions").shift(1) * asset_returns).alias(
-                    "strategy_returns"
-                ),
+                (pl.col("signal").shift(1) * asset_returns).alias("strategy_returns"),
             ]
         )
 
