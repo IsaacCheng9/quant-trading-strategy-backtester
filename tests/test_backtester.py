@@ -20,7 +20,7 @@ from quant_trading_strategy_backtester.strategies.moving_average_crossover impor
 from quant_trading_strategy_backtester.strategies.pairs_trading import (
     PairsTradingStrategy,
 )
-from tests.conftest import MockHoldingStrategy
+from conftest import MockHoldingStrategy
 
 
 @pytest.mark.parametrize(
