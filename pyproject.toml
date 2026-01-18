@@ -29,7 +29,7 @@ packages = ["src/quant_trading_strategy_backtester"]
 [tool.uv]
 dev-dependencies = [
     "ruff>=0.14.13",
-    "pytest<9.0.0,>=8.3.2",
+    "pytest>=9.0.2",
     "poethepoet<1.0.0,>=0.27.0",
     "watchdog<5.0.0,>=4.0.1",
     "coverage<8.0.0,>=7.6.0",
