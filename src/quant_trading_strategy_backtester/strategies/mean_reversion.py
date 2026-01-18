@@ -65,10 +65,10 @@ class MeanReversionStrategy(BaseStrategy):
         signals = signals.with_columns(
             [
                 pl.col("Close")
-                .rolling_mean(window_size=self.window, min_periods=self.window)
+                .rolling_mean(window_size=self.window, min_samples=self.window)
                 .alias("mean"),
                 pl.col("Close")
-                .rolling_std(window_size=self.window, min_periods=self.window)
+                .rolling_std(window_size=self.window, min_samples=self.window)
                 .alias("std"),
             ]
         )

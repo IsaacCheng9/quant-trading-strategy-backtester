@@ -9,7 +9,7 @@ historical market data, featuring customisable parameters and key performance
 metrics. Developed with Python.
 
 _Try the deployed app
-[here!](https://quant-trading-strategy-backtester.streamlit.app/)_
+[here on Streamlit Cloud!](https://quant-trading-strategy-backtester.streamlit.app/)_
 
 ## Screenshots
 
