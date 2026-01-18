@@ -20,6 +20,7 @@ from quant_trading_strategy_backtester.strategies.moving_average_crossover impor
 from quant_trading_strategy_backtester.strategies.pairs_trading import (
     PairsTradingStrategy,
 )
+from conftest import MockHoldingStrategy
 
 
 @pytest.mark.parametrize(
@@ -84,7 +85,7 @@ def test_backtester_run(
     backtester = Backtester(data, strategy)
     results = backtester.run()
     assert isinstance(results, pl.DataFrame)
-    EXPECTED_COLS = {"positions", "strategy_returns", "equity_curve"}
+    EXPECTED_COLS = {"position_change", "strategy_returns", "equity_curve"}
     for col in EXPECTED_COLS:
         assert col in results.columns
 
@@ -198,7 +199,7 @@ def test_backtester_with_insufficient_data_all_strategies(
 
     # Check that no meaningful trading occurred
     # Allow for small floating-point errors
-    assert abs(results["positions"].sum()) < 1e-6
+    assert abs(results["position_change"].sum()) < 1e-6
     # Check that the equity curve doesn't change significantly
     assert abs(results["equity_curve"].tail(1)[0] - backtester.initial_capital) < 1e-6
     # Check that cumulative returns are close to 1 (no significant change)
@@ -234,3 +235,58 @@ def test_backtester_save_results(mock_db_session, mock_polars_data):
     )
 
     assert saved_strategy.max_drawdown is not None
+
+
+def test_returns_captured_while_holding_position():
+    """
+    Verifies that returns are captured for all days while holding a position,
+    not just on the day after entry.
+    """
+    # Create data with known daily returns:
+    # Day 1 -> 2: +10%, Day 2 -> 3: +10%, Day 3 -> 4: +10%, Day 4 -> 5: -10%
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+                datetime.date(2020, 1, 4),
+                datetime.date(2020, 1, 5),
+            ],
+            "Close": [100.0, 110.0, 121.0, 133.1, 119.79],
+        }
+    )
+
+    # Signal: flat, then long for 3 days, then flat
+    # signal = [0, 1, 1, 1, 0]
+    # position_change = [0, 1, 0, 0, -1]  (signal.diff())
+    signals = [0.0, 1.0, 1.0, 1.0, 0.0]
+    strategy = MockHoldingStrategy({"signals": signals})
+    backtester = Backtester(data, strategy)
+    results = backtester.run()
+
+    # Expected strategy returns (using signal.shift(1)):
+    # Day 1: signal.shift(1) = null -> 0, return = 0
+    # Day 2: signal.shift(1) = 0, return = 0 (not in position yesterday)
+    # Day 3: signal.shift(1) = 1, return = +10% (in position yesterday)
+    # Day 4: signal.shift(1) = 1, return = +10% (in position yesterday)
+    # Day 5: signal.shift(1) = 1, return = -10% (in position yesterday)
+    strategy_returns = results["strategy_returns"].to_list()
+
+    # Days 3-5 should capture ~10% return
+    assert abs(strategy_returns[2] - 0.10) < 0.001, (
+        f"Day 3 should capture ~10% return, got {strategy_returns[2]}"
+    )
+    assert abs(strategy_returns[3] - 0.10) < 0.001, (
+        f"Day 4 should capture ~10% return, got {strategy_returns[3]}"
+    )
+    assert abs(strategy_returns[4] - (-0.10)) < 0.01, (
+        f"Day 5 should capture ~-10% return, got {strategy_returns[4]}"
+    )
+
+    # Cumulative return should be ~(1.1 * 1.1 * 0.9) - 1 = 8.9%
+    total_return = float(results["cumulative_returns"].tail(1).item()) - 1
+    expected_return = (1.10 * 1.10 * 0.90) - 1  # ~8.9%
+    assert abs(total_return - expected_return) < 0.01, (
+        f"Total return should be ~{expected_return:.1%}, got {total_return:.1%}"
+    )

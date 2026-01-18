@@ -110,11 +110,9 @@ class Backtester:
 
         portfolio = signals.with_columns(
             [
-                pl.col("positions"),
+                pl.col("position_change"),
                 asset_returns.alias("asset_returns"),
-                (pl.col("positions").shift(1) * asset_returns).alias(
-                    "strategy_returns"
-                ),
+                (pl.col("signal").shift(1) * asset_returns).alias("strategy_returns"),
             ]
         )
 

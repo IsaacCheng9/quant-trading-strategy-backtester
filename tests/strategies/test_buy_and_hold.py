@@ -19,10 +19,10 @@ def test_buy_and_hold_strategy_generate_signals(mock_polars_data: pl.DataFrame) 
     strategy = BuyAndHoldStrategy(params)
     signals = strategy.generate_signals(mock_polars_data)
     assert isinstance(signals, pl.DataFrame)
-    EXPECTED_COLS = {"Date", "Close", "signal", "positions"}
+    EXPECTED_COLS = {"Date", "Close", "signal", "position_change"}
     assert all(col in signals.columns for col in EXPECTED_COLS)
     assert (signals["signal"] == 1).all(), "All signals should be 1 (buy)"
-    assert (signals["positions"] == 1).all(), "All positions should be 1"
+    assert (signals["position_change"] == 1).all(), "All position_change should be 1"
 
 
 def test_buy_and_hold_strategy_with_mock_data():
@@ -41,7 +41,7 @@ def test_buy_and_hold_strategy_with_mock_data():
 
     # Check if signals are generated correctly
     assert signals["signal"].sum() == len(signals), "All signals should be buy (1)"
-    assert (signals["positions"] == 1).all(), "All positions should be 1"
+    assert (signals["position_change"] == 1).all(), "All position_change should be 1"
 
     # Check if the strategy maintains the buy position throughout
     assert (signals["signal"] == 1).all(), "Buy signal should be maintained throughout"
@@ -55,7 +55,7 @@ def test_buy_and_hold_strategy_with_empty_data():
 
     assert isinstance(signals, pl.DataFrame)
     assert signals.is_empty()
-    EXPECTED_COLS = {"Date", "Close", "signal", "positions"}
+    EXPECTED_COLS = {"Date", "Close", "signal", "position_change"}
     assert all(col in signals.columns for col in EXPECTED_COLS)
 
 
@@ -81,4 +81,4 @@ def test_buy_and_hold_strategy_with_various_price_movements():
 
     # Check if the strategy maintains the buy position regardless of price movements
     assert (signals["signal"] == 1).all(), "Buy signal should be maintained throughout"
-    assert (signals["positions"] == 1).all(), "All positions should be 1"
+    assert (signals["position_change"] == 1).all(), "All position_change should be 1"

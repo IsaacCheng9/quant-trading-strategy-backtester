@@ -42,7 +42,7 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
 
         Returns:
             A DataFrame containing the generated trading signals. Columns
-            include 'signal', 'short_mavg', 'long_mavg', and 'positions'.
+            include 'signal', 'short_mavg', 'long_mavg', and 'position_change'.
         """
         if data.is_empty():
             return pl.DataFrame(
@@ -52,7 +52,7 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
                     ("short_mavg", pl.Float64),
                     ("long_mavg", pl.Float64),
                     ("signal", pl.Float64),
-                    ("positions", pl.Float64),
+                    ("position_change", pl.Float64),
                 ]
             )
 
@@ -87,7 +87,7 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
         # If the short-term moving average is below the long-term moving
         # average, generate a sell signal by setting all non-buy signals to -1.
         signals = signals.with_columns(
-            [pl.col("signal").diff().fill_null(0.0).alias("positions")]
+            [pl.col("signal").diff().fill_null(0.0).alias("position_change")]
         )
 
         return signals
