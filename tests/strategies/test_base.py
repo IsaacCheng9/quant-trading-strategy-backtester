@@ -46,6 +46,6 @@ def test_strategy_with_empty_data(
     assert isinstance(signals, pl.DataFrame)
     assert "Date" in signals.columns
     assert "signal" in signals.columns
-    assert "positions" in signals.columns
+    assert "position_change" in signals.columns
     assert signals.is_empty()
     assert signals.is_empty()

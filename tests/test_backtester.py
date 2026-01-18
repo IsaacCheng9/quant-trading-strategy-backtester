@@ -85,7 +85,7 @@ def test_backtester_run(
     backtester = Backtester(data, strategy)
     results = backtester.run()
     assert isinstance(results, pl.DataFrame)
-    EXPECTED_COLS = {"positions", "strategy_returns", "equity_curve"}
+    EXPECTED_COLS = {"position_change", "strategy_returns", "equity_curve"}
     for col in EXPECTED_COLS:
         assert col in results.columns
 
@@ -199,7 +199,7 @@ def test_backtester_with_insufficient_data_all_strategies(
 
     # Check that no meaningful trading occurred
     # Allow for small floating-point errors
-    assert abs(results["positions"].sum()) < 1e-6
+    assert abs(results["position_change"].sum()) < 1e-6
     # Check that the equity curve doesn't change significantly
     assert abs(results["equity_curve"].tail(1)[0] - backtester.initial_capital) < 1e-6
     # Check that cumulative returns are close to 1 (no significant change)
@@ -259,7 +259,7 @@ def test_returns_captured_while_holding_position():
 
     # Signal: flat, then long for 3 days, then flat
     # signal = [0, 1, 1, 1, 0]
-    # positions = [0, 1, 0, 0, -1]  (signal.diff())
+    # position_change = [0, 1, 0, 0, -1]  (signal.diff())
     signals = [0.0, 1.0, 1.0, 1.0, 0.0]
     strategy = MockHoldingStrategy({"signals": signals})
     backtester = Backtester(data, strategy)

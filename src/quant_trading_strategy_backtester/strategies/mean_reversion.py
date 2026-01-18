@@ -47,7 +47,7 @@ class MeanReversionStrategy(BaseStrategy):
         Returns:
             A DataFrame containing the generated trading signals. Columns
             include 'signal', 'mean', 'std', 'upper_band', 'lower_band', and
-            'positions'.
+            'position_change'.
         """
         if data.is_empty():
             return pl.DataFrame(
@@ -57,7 +57,7 @@ class MeanReversionStrategy(BaseStrategy):
                     ("short_mavg", pl.Float64),
                     ("long_mavg", pl.Float64),
                     ("signal", pl.Float64),
-                    ("positions", pl.Float64),
+                    ("position_change", pl.Float64),
                 ]
             )
 
@@ -103,7 +103,7 @@ class MeanReversionStrategy(BaseStrategy):
         )
 
         signals = signals.with_columns(
-            [pl.col("signal").diff().fill_null(0).alias("positions")]
+            [pl.col("signal").diff().fill_null(0).alias("position_change")]
         )
 
         return signals

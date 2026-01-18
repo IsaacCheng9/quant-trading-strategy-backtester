@@ -22,7 +22,14 @@ def test_mean_reversion_strategy_generate_signals(
     strategy = MeanReversionStrategy(params)
     signals = strategy.generate_signals(mock_polars_data)
     assert isinstance(signals, pl.DataFrame)
-    EXPECTED_COLS = {"signal", "mean", "std", "upper_band", "lower_band", "positions"}
+    EXPECTED_COLS = {
+        "signal",
+        "mean",
+        "std",
+        "upper_band",
+        "lower_band",
+        "position_change",
+    }
     for col in EXPECTED_COLS:
         assert col in signals.columns
     assert signals["signal"].is_in([0.0, 1.0, -1.0]).all()

@@ -24,7 +24,7 @@ def test_moving_average_crossover_strategy_generate_signals(
     strategy = MovingAverageCrossoverStrategy(params)
     signals = strategy.generate_signals(mock_polars_data)
     assert isinstance(signals, pl.DataFrame)
-    EXPECTED_COLS = {"signal", "short_mavg", "long_mavg", "positions"}
+    EXPECTED_COLS = {"signal", "short_mavg", "long_mavg", "position_change"}
     for col in EXPECTED_COLS:
         assert col in signals.columns
     assert signals["signal"].is_in([0.0, 1.0]).all()
@@ -80,7 +80,7 @@ def test_moving_average_crossover_strategy_with_mock_polars_data():
         "Sell signal not generated at crossunder"
     )
 
-    # Check if positions are calculated correctly
-    non_zero_positions = signals.filter(pl.col("positions") != 0)
-    assert len(non_zero_positions) > 0, "No position changes"
-    assert signals["positions"].abs().sum() > 0, "No position changes"
+    # Check if position changes are calculated correctly
+    non_zero_changes = signals.filter(pl.col("position_change") != 0)
+    assert len(non_zero_changes) > 0, "No position changes"
+    assert signals["position_change"].abs().sum() > 0, "No position changes"

@@ -32,7 +32,7 @@ def test_pairs_trading_strategy_generate_signals() -> None:
     signals = strategy.generate_signals(data)
 
     assert isinstance(signals, pl.DataFrame)
-    EXPECTED_COLS = {"spread", "z_score", "signal", "positions"}
+    EXPECTED_COLS = {"spread", "z_score", "signal", "position_change"}
     for col in EXPECTED_COLS:
         assert col in signals.columns
     assert signals["signal"].is_in([0.0, 1.0, -1.0]).all()
@@ -135,10 +135,10 @@ def test_pairs_trading_strategy_with_mock_polars_data():
     assert len(entry_short) > 0, "No short entry signals generated"
     assert len(exit_positions) > 0, "No exit signals generated"
 
-    # Check if positions are calculated correctly
-    non_zero_positions = signals.filter(pl.col("positions") != 0)
-    assert len(non_zero_positions) > 0, "No position changes"
-    assert signals["positions"].abs().sum() > 0, "No position changes"
+    # Check if position changes are calculated correctly
+    non_zero_changes = signals.filter(pl.col("position_change") != 0)
+    assert len(non_zero_changes) > 0, "No position changes"
+    assert signals["position_change"].abs().sum() > 0, "No position changes"
 
     # Check if the spread and z-score are calculated correctly
     assert (signals["spread"] == signals["Close_1"] - signals["Close_2"]).all(), (

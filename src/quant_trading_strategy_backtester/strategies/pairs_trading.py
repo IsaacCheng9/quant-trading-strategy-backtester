@@ -60,7 +60,7 @@ class PairsTradingStrategy(BaseStrategy):
             - 'spread': The price difference between the two assets.
             - 'z_score': The standardised score of the spread.
             - 'signal': The trading signal (-1, 0, or 1).
-            - 'positions': The change in position from the previous period.
+            - 'position_change': The change in position from the previous period.
         """
         if data.is_empty():
             return pl.DataFrame(
@@ -70,7 +70,7 @@ class PairsTradingStrategy(BaseStrategy):
                     ("short_mavg", pl.Float64),
                     ("long_mavg", pl.Float64),
                     ("signal", pl.Float64),
-                    ("positions", pl.Float64),
+                    ("position_change", pl.Float64),
                 ]
             )
         if "Close_1" not in data.columns or "Close_2" not in data.columns:
@@ -126,9 +126,9 @@ class PairsTradingStrategy(BaseStrategy):
             [pl.col("signal").forward_fill().fill_null(0).alias("signal")]
         )
 
-        # Calculate positions (changes in signal)
+        # Calculate position changes
         signals = signals.with_columns(
-            [pl.col("signal").diff().fill_null(0).alias("positions")]
+            [pl.col("signal").diff().fill_null(0).alias("position_change")]
         )
 
         return signals

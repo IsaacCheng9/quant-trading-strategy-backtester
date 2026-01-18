@@ -29,7 +29,7 @@ class MockHoldingStrategy(BaseStrategy):
                 pl.Series("signal", self.signals)
                 .diff()
                 .fill_null(0)
-                .alias("positions"),
+                .alias("position_change"),
             ]
         )
 
