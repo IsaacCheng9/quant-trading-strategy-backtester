@@ -49,7 +49,9 @@ def test_load_yfinance_data_two_tickers(
                 ("High", "MSFT"): base_data["High"],
             }
         )
-        multi_index_data.columns = pd.MultiIndex.from_tuples(multi_index_data.columns)
+        multi_index_data.columns = pd.MultiIndex.from_tuples(
+            list(multi_index_data.columns)
+        )
         return multi_index_data
 
     monkeypatch.setattr("yfinance.download", mock_download)
