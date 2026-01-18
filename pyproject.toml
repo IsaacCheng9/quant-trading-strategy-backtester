@@ -8,12 +8,12 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "streamlit<2.0.0,>=1.37.0",
-    "pandas<3.0.0,>=2.2.3",
+    "streamlit>=1.53.0,<2.0",
+    "pandas>=2.3.3,<3.0",
     "numpy<3.0.0,>=2.1.2",
-    "yfinance<1.0.0,>=0.2.61",
-    "plotly<6.0.0,>=5.23.0",
-    "polars<2.0.0,>=1.10.0",
+    "yfinance>=1.0",
+    "plotly>=6.5.2",
+    "polars>=1.37.1,<2.0",
     "sqlalchemy<3.0.0,>=2.0.35",
     "lxml>=5.4.0",
     "requests>=2.32.5",
@@ -28,7 +28,7 @@ packages = ["src/quant_trading_strategy_backtester"]
 
 [tool.uv]
 dev-dependencies = [
-    "ruff<1.0.0,>=0.5.5",
+    "ruff>=0.14.13",
     "pytest<9.0.0,>=8.3.2",
     "poethepoet<1.0.0,>=0.27.0",
     "watchdog<5.0.0,>=4.0.1",
