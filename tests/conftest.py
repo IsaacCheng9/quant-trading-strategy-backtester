@@ -9,6 +9,30 @@ from quant_trading_strategy_backtester.models import Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+
+from typing import Any
+
+
+class MockHoldingStrategy(BaseStrategy):
+    """A mock strategy that holds a long position for a known period."""
+
+    def __init__(self, params: dict[str, Any]):
+        super().__init__(params)
+        self.signals = params["signals"]
+
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
+        """Returns predetermined signals for testing."""
+        return data.select([pl.col("Date"), pl.col("Close")]).with_columns(
+            [
+                pl.Series("signal", self.signals),
+                pl.Series("signal", self.signals)
+                .diff()
+                .fill_null(0)
+                .alias("positions"),
+            ]
+        )
+
 
 @pytest.fixture
 def mock_yfinance_data() -> pd.DataFrame:
