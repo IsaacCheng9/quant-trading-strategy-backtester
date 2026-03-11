@@ -4,7 +4,7 @@ interface.
 """
 
 import datetime
-from typing import Any, cast
+from typing import Any
 
 import streamlit as st
 from quant_trading_strategy_backtester.strategies.base import TRADING_STRATEGIES
@@ -25,9 +25,7 @@ def get_user_inputs_except_strategy_params() -> tuple[
         type, and a boolean indicating whether to use automatic ticker
         selection for pairs trading or buy and hold.
     """
-    strategy_type = cast(
-        str, st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
-    )
+    strategy_type = st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
 
     auto_select_tickers = False
     # Two ticker strategies
@@ -62,14 +60,8 @@ def get_user_inputs_except_strategy_params() -> tuple[
     else:
         ticker = st.sidebar.text_input("Ticker Symbol", value="AAPL").upper()
 
-    start_date: datetime.date = cast(
-        datetime.date,
-        st.sidebar.date_input("Start Date", value=datetime.date(2020, 1, 1)),
-    )
-    end_date: datetime.date = cast(
-        datetime.date,
-        st.sidebar.date_input("End Date", value=datetime.date(2023, 12, 31)),
-    )
+    start_date = st.sidebar.date_input("Start Date", value=datetime.date(2020, 1, 1))
+    end_date = st.sidebar.date_input("End Date", value=datetime.date(2023, 12, 31))
 
     return ticker, start_date, end_date, strategy_type, auto_select_tickers
 

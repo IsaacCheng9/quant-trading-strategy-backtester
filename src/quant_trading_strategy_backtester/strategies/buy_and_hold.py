@@ -41,13 +41,16 @@ class BuyAndHoldStrategy(BaseStrategy):
                 ]
             )
 
-        signals = data.select([pl.col("Date"), pl.col("Close")])
-        # Add the 'signal' and 'position_change' columns.
-        signals = signals.with_columns(
-            [
-                pl.lit(1.0).alias("signal"),
-                pl.lit(1.0).alias("position_change"),
-            ]
+        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
+            data.select([pl.col("Date"), pl.col("Close")])
+            .lazy()
+            .with_columns(
+                [
+                    pl.lit(1.0).alias("signal"),
+                    pl.lit(1.0).alias("position_change"),
+                ]
+            )
+            .collect()
         )
 
         return signals

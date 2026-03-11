@@ -76,59 +76,67 @@ class PairsTradingStrategy(BaseStrategy):
         if "Close_1" not in data.columns or "Close_2" not in data.columns:
             raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
 
-        signals = data.select(
-            [
-                pl.col("Date"),
-                pl.col("Close_1"),
-                pl.col("Close_2"),
-                (pl.col("Close_1") - pl.col("Close_2")).alias("spread"),
-            ]
-        )
-
-        # Calculate rolling mean and std, handling potential division by zero
-        signals = signals.with_columns(
-            [
-                pl.col("spread")
-                .rolling_mean(window_size=self.window, min_samples=self.window)
-                .alias("spread_mean"),
-                pl.col("spread")
-                .rolling_std(window_size=self.window, min_samples=self.window)
-                .alias("spread_std"),
-            ]
-        )
-
-        # Calculate z-score, avoiding division by zero
-        signals = signals.with_columns(
-            [
-                pl.when(pl.col("spread_std") != 0)
-                .then((pl.col("spread") - pl.col("spread_mean")) / pl.col("spread_std"))
-                .otherwise(0)
-                .alias("z_score")
-            ]
-        )
-
-        # Generate trading signals
-        signals = signals.with_columns(
-            [
-                pl.when(pl.col("z_score") > self.entry_z_score)
-                .then(-1)
-                .when(pl.col("z_score") < -self.entry_z_score)
-                .then(1)
-                .when(pl.col("z_score").abs() < self.exit_z_score)
-                .then(0)
-                .otherwise(None)
-                .alias("signal")
-            ]
-        )
-
-        # Fill forward the signal
-        signals = signals.with_columns(
-            [pl.col("signal").forward_fill().fill_null(0).alias("signal")]
-        )
-
-        # Calculate position changes
-        signals = signals.with_columns(
-            [pl.col("signal").diff().fill_null(0).alias("position_change")]
+        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
+            data.select(
+                [
+                    pl.col("Date"),
+                    pl.col("Close_1"),
+                    pl.col("Close_2"),
+                    (pl.col("Close_1") - pl.col("Close_2")).alias("spread"),
+                ]
+            )
+            .lazy()
+            # Calculate rolling mean and std.
+            .with_columns(
+                [
+                    pl.col("spread")
+                    .rolling_mean(
+                        window_size=self.window,
+                        min_samples=self.window,
+                    )
+                    .alias("spread_mean"),
+                    pl.col("spread")
+                    .rolling_std(
+                        window_size=self.window,
+                        min_samples=self.window,
+                    )
+                    .alias("spread_std"),
+                ]
+            )
+            # Calculate z-score, avoiding division by zero.
+            .with_columns(
+                [
+                    pl.when(pl.col("spread_std") != 0)
+                    .then(
+                        (pl.col("spread") - pl.col("spread_mean"))
+                        / pl.col("spread_std")
+                    )
+                    .otherwise(0)
+                    .alias("z_score")
+                ]
+            )
+            # Generate trading signals.
+            .with_columns(
+                [
+                    pl.when(pl.col("z_score") > self.entry_z_score)
+                    .then(-1)
+                    .when(pl.col("z_score") < -self.entry_z_score)
+                    .then(1)
+                    .when(pl.col("z_score").abs() < self.exit_z_score)
+                    .then(0)
+                    .otherwise(None)
+                    .alias("signal")
+                ]
+            )
+            # Fill forward the signal.
+            .with_columns(
+                [pl.col("signal").forward_fill().fill_null(0).alias("signal")]
+            )
+            # Calculate position changes.
+            .with_columns(
+                [pl.col("signal").diff().fill_null(0).alias("position_change")]
+            )
+            .collect()
         )
 
         return signals
