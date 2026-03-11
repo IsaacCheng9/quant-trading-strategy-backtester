@@ -93,9 +93,8 @@ def display_returns_by_month(results: pl.DataFrame) -> None:
         return
 
     monthly_returns = (
-        results.with_columns(
-            pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)")
-        )
+        results.lazy()
+        .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)"))
         .group_by("Month (YYYY-MM)")
         .agg(
             [
@@ -111,24 +110,27 @@ def display_returns_by_month(results: pl.DataFrame) -> None:
             ).alias("Monthly Return (%)")
         )
         .sort("Month (YYYY-MM)")
+        .collect()
     )
 
     if monthly_returns.is_empty():
         st.write("No monthly data available after aggregation.")
     else:
         initial_start_value = monthly_returns["start_value"][0]
-        # Calculate rolling returns
-        monthly_returns = monthly_returns.with_columns(
-            ((pl.col("end_value") / initial_start_value - 1) * 100).alias(
-                "Rolling Return (%)"
+        monthly_returns = (
+            monthly_returns.lazy()
+            .with_columns(
+                ((pl.col("end_value") / initial_start_value - 1) * 100).alias(
+                    "Rolling Return (%)"
+                )
             )
-        )
-        # Round the percentage columns
-        monthly_returns = monthly_returns.with_columns(
-            [
-                pl.col("Monthly Return (%)").round(2),
-                pl.col("Rolling Return (%)").round(2),
-            ]
+            .with_columns(
+                [
+                    pl.col("Monthly Return (%)").round(2),
+                    pl.col("Rolling Return (%)").round(2),
+                ]
+            )
+            .collect()
         )
         # Display the table
         st.dataframe(
