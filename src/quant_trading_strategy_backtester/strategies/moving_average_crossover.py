@@ -56,38 +56,40 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
                 ]
             )
 
-        signals = data.select([pl.col("Date"), pl.col("Close")])
-        signals = signals.with_columns(
-            [
-                pl.col("Close")
-                .rolling_mean(
-                    window_size=self.short_window, min_samples=self.short_window
-                )
-                .alias("short_mavg"),
-                pl.col("Close")
-                .rolling_mean(
-                    window_size=self.long_window, min_samples=self.long_window
-                )
-                .alias("long_mavg"),
-                pl.lit(0.0).alias("signal"),
-            ]
-        )
-
-        signals = signals.with_columns(
-            [
-                # If the short-term moving average is above the long-term moving
-                # average, generate a buy signal.
-                pl.when(pl.col("short_mavg") > pl.col("long_mavg"))
-                .then(1.0)
-                .otherwise(0.0)
-                .alias("signal")
-            ]
-        )
-
-        # If the short-term moving average is below the long-term moving
-        # average, generate a sell signal by setting all non-buy signals to -1.
-        signals = signals.with_columns(
-            [pl.col("signal").diff().fill_null(0.0).alias("position_change")]
+        signals = (
+            data.select([pl.col("Date"), pl.col("Close")])
+            .lazy()
+            .with_columns(
+                [
+                    pl.col("Close")
+                    .rolling_mean(
+                        window_size=self.short_window,
+                        min_samples=self.short_window,
+                    )
+                    .alias("short_mavg"),
+                    pl.col("Close")
+                    .rolling_mean(
+                        window_size=self.long_window,
+                        min_samples=self.long_window,
+                    )
+                    .alias("long_mavg"),
+                    pl.lit(0.0).alias("signal"),
+                ]
+            )
+            .with_columns(
+                [
+                    # If the short-term moving average is above the long-term
+                    # moving average, generate a buy signal.
+                    pl.when(pl.col("short_mavg") > pl.col("long_mavg"))
+                    .then(1.0)
+                    .otherwise(0.0)
+                    .alias("signal")
+                ]
+            )
+            .with_columns(
+                [pl.col("signal").diff().fill_null(0.0).alias("position_change")]
+            )
+            .collect()
         )
 
         return signals
