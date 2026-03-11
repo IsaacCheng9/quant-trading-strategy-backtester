@@ -50,7 +50,7 @@ def test_load_yfinance_data_two_tickers(
             }
         )
         multi_index_data.columns = pd.MultiIndex.from_tuples(
-            list(multi_index_data.columns)
+            list(multi_index_data.columns)  # type: ignore[invalid-argument-type]
         )
         return multi_index_data
 
