@@ -33,7 +33,7 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.data.load_yfinance_data_two_tickers",
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
         mock_load_data,
     )
     monkeypatch.setattr(
