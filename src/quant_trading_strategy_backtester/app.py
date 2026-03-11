@@ -30,10 +30,8 @@ from quant_trading_strategy_backtester.optimiser import (
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
-    optimise_strategy_params,
     run_backtest,
     run_optimisation,
-    walk_forward_optimise,
 )
 from quant_trading_strategy_backtester.streamlit_ui import (
     get_user_inputs_except_strategy_params,
@@ -166,19 +164,15 @@ def prepare_single_ticker_strategy_with_optimisation(
     data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
 
     # Optimise strategy parameters if requested.
-    if optimise and walk_forward:
-        best_params, _, _ = walk_forward_optimise(
+    if optimise:
+        best_params, _ = run_optimisation(
             data,
             strategy_type,
-            cast(dict[str, range | list[int | float]], strategy_params),
+            strategy_params,
+            start_date,
+            end_date,
             best_ticker,
-        )
-    elif optimise:
-        best_params, _ = optimise_strategy_params(
-            data,
-            strategy_type,
-            cast(dict[str, range | list[int | float]], strategy_params),
-            best_ticker,
+            walk_forward=walk_forward,
         )
     else:
         best_params = {

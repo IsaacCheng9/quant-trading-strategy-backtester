@@ -435,7 +435,7 @@ def test_prepare_single_ticker_strategy_with_optimisation(monkeypatch):
     def mock_load_data(*args, **kwargs):
         return mock_polars_data
 
-    def mock_optimise_strategy_params(*args, **kwargs):
+    def mock_run_optimisation(*args, **kwargs):
         return {"short_window": 15, "long_window": 60}, {"Sharpe Ratio": 1.8}
 
     monkeypatch.setattr(
@@ -451,8 +451,8 @@ def test_prepare_single_ticker_strategy_with_optimisation(monkeypatch):
         mock_load_data,
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.optimise_strategy_params",
-        mock_optimise_strategy_params,
+        "quant_trading_strategy_backtester.app.run_optimisation",
+        mock_run_optimisation,
     )
 
     start_date = datetime.date(2020, 1, 1)
