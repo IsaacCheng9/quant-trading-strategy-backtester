@@ -18,6 +18,8 @@ from quant_trading_strategy_backtester.models import Session
 from quant_trading_strategy_backtester.models import StrategyModel as StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
+TRADING_DAYS_PER_YEAR = 252
+
 
 def is_running_locally() -> bool:
     """
@@ -42,6 +44,8 @@ class Backtester:
         data: Historical price data.
         strategy: The trading strategy to backtest.
         initial_capital: The initial capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
         results: The results of the backtest (initialised after running).
         tickers: The ticker or tickers used in the backtest.
     """
@@ -51,12 +55,16 @@ class Backtester:
         data: pl.DataFrame,
         strategy: BaseStrategy,
         initial_capital: float = 100000.0,
+        transaction_cost_bps: float = 5.0,
+        slippage_bps: float = 3.0,
         session=None,
         tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data
         self.strategy = strategy
         self.initial_capital = initial_capital
+        self.transaction_cost_bps = transaction_cost_bps
+        self.slippage_bps = slippage_bps
         self.results: None | pl.DataFrame = None
         self.session = session or Session()
         self.tickers = tickers
@@ -127,6 +135,16 @@ class Backtester:
                     .fill_null(0)
                 ]
             )
+            # Deduct transaction costs and slippage on position changes.
+            .with_columns(
+                [
+                    (
+                        pl.col("strategy_returns")
+                        - pl.col("position_change").abs()
+                        * ((self.transaction_cost_bps + self.slippage_bps) / 10_000)
+                    ).alias("strategy_returns")
+                ]
+            )
             .with_columns(
                 [
                     (1 + pl.col("strategy_returns"))
@@ -168,8 +186,8 @@ class Backtester:
             - 1
         )
 
-        # Measure the risk-adjusted return, assuming 252 trading days per year.
-        periods = 252
+        # Measure the risk-adjusted return.
+        periods = TRADING_DAYS_PER_YEAR
         rf_daily = (1 + risk_free_return_rate_annual) ** (1 / periods) - 1
         excess = self.results["strategy_returns"].cast(pl.Float64) - rf_daily
         returns_mean = float(excess.mean())
@@ -204,13 +222,6 @@ class Backtester:
 
         strategy_params = self.strategy.get_parameters()
         strategy_name = self.strategy.__class__.__name__
-
-        # Extract tickers from data columns if not provided
-        if self.tickers is None:
-            if "Close_1" in self.data.columns and "Close_2" in self.data.columns:
-                pass
-            else:
-                pass
 
         # Determine start and end dates
         start_date_row = self.data.select(

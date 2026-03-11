@@ -290,3 +290,88 @@ def test_returns_captured_while_holding_position():
     assert abs(total_return - expected_return) < 0.01, (
         f"Total return should be ~{expected_return:.1%}, got {total_return:.1%}"
     )
+
+
+def test_transaction_costs_reduce_returns():
+    """
+    Verify that transaction costs reduce returns proportionally to the
+    number and size of position changes.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+                datetime.date(2020, 1, 4),
+                datetime.date(2020, 1, 5),
+            ],
+            "Close": [100.0, 110.0, 121.0, 133.1, 119.79],
+        }
+    )
+
+    signals = [0.0, 1.0, 1.0, 1.0, 0.0]
+    strategy = MockHoldingStrategy({"signals": signals})
+
+    # Run without costs.
+    bt_no_costs = Backtester(data, strategy, transaction_cost_bps=0.0, slippage_bps=0.0)
+    results_no_costs = bt_no_costs.run()
+    return_no_costs = float(results_no_costs["cumulative_returns"].tail(1).item())
+
+    # Run with costs (10bps transaction + 5bps slippage).
+    bt_with_costs = Backtester(
+        data, strategy, transaction_cost_bps=10.0, slippage_bps=5.0
+    )
+    results_with_costs = bt_with_costs.run()
+    return_with_costs = float(results_with_costs["cumulative_returns"].tail(1).item())
+
+    assert return_with_costs < return_no_costs, (
+        "Returns with transaction costs should be lower"
+    )
+
+    # There are 2 position changes (entry on day 2, exit on day 5),
+    # each costing 15bps = 0.0015. Verify the cost is deducted on
+    # those days only.
+    cost_per_trade = 15.0 / 10_000
+    returns_no = results_no_costs["strategy_returns"].to_list()
+    returns_with = results_with_costs["strategy_returns"].to_list()
+
+    for i in range(len(returns_no)):
+        position_change = abs(results_with_costs["position_change"][i])
+        expected_diff = position_change * cost_per_trade
+        actual_diff = returns_no[i] - returns_with[i]
+        assert abs(actual_diff - expected_diff) < 1e-10, (
+            f"Day {i + 1}: expected cost deduction {expected_diff}, got {actual_diff}"
+        )
+
+
+def test_default_transaction_costs_reduce_returns():
+    """
+    Verify that the default transaction costs (5bps each) produce
+    lower returns than explicitly zero costs.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+            ],
+            "Close": [100.0, 110.0, 121.0],
+        }
+    )
+
+    signals = [0.0, 1.0, 1.0]
+    strategy = MockHoldingStrategy({"signals": signals})
+
+    bt_default = Backtester(data, strategy)
+    bt_zero = Backtester(data, strategy, transaction_cost_bps=0.0, slippage_bps=0.0)
+
+    results_default = bt_default.run()
+    results_zero = bt_zero.run()
+
+    default_cum = float(results_default["cumulative_returns"].tail(1).item())
+    zero_cum = float(results_zero["cumulative_returns"].tail(1).item())
+    assert default_cum < zero_cum, (
+        "Default costs should produce lower returns than zero costs"
+    )
