@@ -4,9 +4,13 @@ implementation and the Polars implementation of the quant trading strategy
 backtester.
 """
 
+from pathlib import Path
+
 import numpy as np
 import plotly.graph_objects as go
 import polars as pl
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 def load_and_process_benchmark_data(
@@ -52,7 +56,7 @@ def visualise_benchmark_times(
     num_runs = len(pandas_times)
     run_num_labels = [f"Run {i + 1}" for i in range(num_runs)]
 
-    # Calculate average speed-up
+    # Calculate average speed-up.
     avg_speedup = (pandas_mean / polars_mean - 1) * 100
     fig = go.Figure(
         data=[
@@ -60,85 +64,72 @@ def visualise_benchmark_times(
                 name="pandas",
                 x=run_num_labels,
                 y=pandas_times,
-                marker_color="red",
-                opacity=0.80,
-                error_y=dict(type="data", array=[pandas_std] * num_runs, visible=True),
+                marker_color="#FF4136",
+                text=[f"{t:.2f}s" for t in pandas_times],
+                textposition="outside",
+                textfont=dict(size=18),
             ),
             go.Bar(
                 name="Polars",
                 x=run_num_labels,
                 y=polars_times,
-                marker_color="blue",
-                opacity=0.80,
-                error_y=dict(type="data", array=[polars_std] * num_runs, visible=True),
+                marker_color="#0074D9",
+                text=[f"{t:.2f}s" for t in polars_times],
+                textposition="outside",
+                textfont=dict(size=18),
             ),
         ]
     )
-    # Change the bar mode and update layout
     fig.update_layout(
         barmode="group",
         title=dict(
             text=(
-                f"pandas vs. Polars: Pairs Trading with Ticker-Pair and Parameter "
-                f"Optimisation – Execution Time ({benchmark_platform})<br>"
-                f"<sub>Average Speed-Up: {avg_speedup:.3f}%</sub>"
+                f"pandas vs. Polars: Pairs Trading with"
+                f" Ticker-Pair and Parameter Optimisation"
+                f" ({benchmark_platform})<br>"
+                f"<sub>Average Speed-Up:"
+                f" {avg_speedup:.1f}% | "
+                f"pandas: {pandas_mean:.2f}s"
+                f" (std {pandas_std:.2f}s) | "
+                f"Polars: {polars_mean:.2f}s"
+                f" (std {polars_std:.2f}s)</sub>"
             ),
-            font=dict(size=20),
+            font=dict(size=28),
             y=0.95,
             x=0.5,
             xanchor="center",
             yanchor="top",
         ),
-        xaxis_title="Run Number",
-        yaxis_title="Execution Time (seconds)",
+        xaxis_title=dict(text="Run Number", font=dict(size=20)),
+        yaxis_title=dict(text="Execution Time (seconds)", font=dict(size=20)),
+        # Leave room above the tallest bar for text labels.
+        yaxis=dict(range=[0, max(pandas_times) * 1.15]),
+        margin=dict(t=130),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=0.99,
+            xanchor="right",
+            x=1,
+            font=dict(size=16),
+        ),
+        plot_bgcolor="white",
     )
-    # Add value labels on top of each bar
-    for i in range(num_runs):
-        fig.add_annotation(
-            x=f"Run {i + 1}",
-            y=pandas_times[i],
-            text=f"{pandas_times[i]:.4f}",
-            showarrow=False,
-            yshift=10,
-        )
-        fig.add_annotation(
-            x=f"Run {i + 1}",
-            y=polars_times[i],
-            text=f"{polars_times[i]:.4f}",
-            showarrow=False,
-            yshift=10,
-        )
-    # Add summary statistics
-    fig.add_annotation(
-        x=1,
-        y=-0.15,
-        xref="paper",
-        yref="paper",
-        text=f"pandas: Mean = {pandas_mean:.4f}s, Std Dev = {pandas_std:.4f}s<br>"
-        f"Polars: Mean = {polars_mean:.4f}s, Std Dev = {polars_std:.4f}s",
-        showarrow=False,
-        font=dict(size=12),
-        align="right",
-        xanchor="right",
-        yanchor="top",
-    )
+    fig.update_xaxes(showgrid=False, tickfont=dict(size=16))
+    fig.update_yaxes(gridcolor="#eee", tickfont=dict(size=16))
 
-    # Save the plot as an interactive HTML file
+    # Save the plot as an interactive HTML file.
+    resources_dir = PROJECT_ROOT / "resources"
     platform_prefix = benchmark_platform.lower().replace(" ", "_")
-    fig.write_html(f"resources/{platform_prefix}_benchmark_results.html")
-    # Show the plot (if running in an environment that supports it)
+    fig.write_html(str(resources_dir / f"{platform_prefix}_benchmark_results.html"))
     fig.show()
 
 
 if __name__ == "__main__":
     PANDAS_AND_POLARS_BENCHMARKS = {
         "M1 Max": [
-            "resources/m1_max_pandas_pairs_trading_with_optimisers.csv",
-            "resources/m1_max_polars_pairs_trading_with_optimisers.csv",
-        ],
-        "Streamlit": [
-            "resources/streamlit_pandas_pairs_trading_with_optimisers.csv",
-            "resources/streamlit_polars_pairs_trading_with_optimisers.csv",
+            str(PROJECT_ROOT / "resources/pandas_pairs_trading_benchmark.csv"),
+            str(PROJECT_ROOT / "resources/polars_pairs_trading_benchmark.csv"),
         ],
     }
     for platform, (

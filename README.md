@@ -47,21 +47,17 @@ _Try the deployed app
 
 I originally implemented the backtester and optimiser using
 [pandas](https://pandas.pydata.org/), but I wanted to explore the performance
-benefits of using [Polars](https://pola.rs/).
+benefits of using [Polars](https://pola.rs/) with lazy evaluation.
 
-After refactoring the code to use Polars, I manually benchmarked the two
-implementations on my local machine (Apple M1 Max with 10 CPU cores and 32 GPU
-cores, 32 GB unified memory) and on the deployed Streamlit instance. Each run
-was a backtest from 2020/01/01 to 2023/12/31 for the pairs trading strategy,
-with ticker-pair optimisation amongst the top 20 S&P 500 stocks and parameter
-optimisation enabled.
+I benchmarked the two implementations on my local machine (Apple M1 Max with 10
+CPU cores and 32 GPU cores, 32 GB unified memory). Data for all 190 ticker pairs
+was pre-downloaded to isolate computation from network I/O. Each run executed
+38,000 backtests (190 pairs x 200 parameter combinations) for the pairs trading
+strategy over 2020/01/01 to 2023/12/31.
 
-**Polars was faster by 2.1x on average compared to pandas on my local**
-**machine, and faster by 1.8x on average on the Streamlit instance.**
+**Polars was faster by 2.6x on average compared to pandas.**
 
-![M1 Max Benchmark Results](./resources/m1_max_benchmark_results.png)
-
-![Streamlit Benchmark Results](./resources/streamlit_benchmark_results.png)
+![Benchmark Results](./resources/pairs_trading_benchmark_comparison.png)
 
 The full benchmark results can be found in the CSV files in the
 [resources folder](./resources).
