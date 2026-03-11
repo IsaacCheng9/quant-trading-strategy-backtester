@@ -21,7 +21,8 @@ _Try the deployed app
 <!-- markdownlint-disable-next-line MD033 -->
 <summary>Pairs Trading with Strategy Parameter Optimisation</summary>
 
-![Pairs Trading ](./resources/screenshots/pairs_trading_optimised_strategy_parameters.png)
+![Pairs Trading with Walk-Forward Optimisation 1](./resources/screenshots/pairs_trading_walk_forward_optimised_1.png)
+![Pairs Trading with Walk-Forward Optimisation 2](./resources/screenshots/pairs_trading_walk_forward_optimised_2.png)
 
 </details>
 
