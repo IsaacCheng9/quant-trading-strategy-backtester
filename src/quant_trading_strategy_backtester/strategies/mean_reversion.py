@@ -61,49 +61,60 @@ class MeanReversionStrategy(BaseStrategy):
                 ]
             )
 
-        signals = data.select([pl.col("Date"), pl.col("Close")])
-        signals = signals.with_columns(
-            [
-                pl.col("Close")
-                .rolling_mean(window_size=self.window, min_samples=self.window)
-                .alias("mean"),
-                pl.col("Close")
-                .rolling_std(window_size=self.window, min_samples=self.window)
-                .alias("std"),
-            ]
-        )
-        # Avoid division by zero by replacing 0s with NaN.
-        signals = signals.with_columns(
-            [
-                pl.when(pl.col("std") == 0)
-                .then(pl.lit(float("nan")))
-                .otherwise(pl.col("std"))
-                .alias("std")
-            ]
-        )
-
-        signals = signals.with_columns(
-            [
-                (pl.col("mean") + (self.std_dev * pl.col("std"))).alias("upper_band"),
-                (pl.col("mean") - (self.std_dev * pl.col("std"))).alias("lower_band"),
-            ]
-        )
-
-        signals = signals.with_columns(
-            [
-                # Buy signal
-                pl.when(pl.col("Close") < pl.col("lower_band"))
-                .then(1.0)
-                # Sell signal
-                .when(pl.col("Close") > pl.col("upper_band"))
-                .then(-1.0)
-                .otherwise(0.0)
-                .alias("signal")
-            ]
-        )
-
-        signals = signals.with_columns(
-            [pl.col("signal").diff().fill_null(0).alias("position_change")]
+        signals = (
+            data.select([pl.col("Date"), pl.col("Close")])
+            .lazy()
+            .with_columns(
+                [
+                    pl.col("Close")
+                    .rolling_mean(
+                        window_size=self.window,
+                        min_samples=self.window,
+                    )
+                    .alias("mean"),
+                    pl.col("Close")
+                    .rolling_std(
+                        window_size=self.window,
+                        min_samples=self.window,
+                    )
+                    .alias("std"),
+                ]
+            )
+            # Avoid division by zero by replacing 0s with NaN.
+            .with_columns(
+                [
+                    pl.when(pl.col("std") == 0)
+                    .then(pl.lit(float("nan")))
+                    .otherwise(pl.col("std"))
+                    .alias("std")
+                ]
+            )
+            .with_columns(
+                [
+                    (pl.col("mean") + (self.std_dev * pl.col("std"))).alias(
+                        "upper_band"
+                    ),
+                    (pl.col("mean") - (self.std_dev * pl.col("std"))).alias(
+                        "lower_band"
+                    ),
+                ]
+            )
+            .with_columns(
+                [
+                    # Buy signal
+                    pl.when(pl.col("Close") < pl.col("lower_band"))
+                    .then(1.0)
+                    # Sell signal
+                    .when(pl.col("Close") > pl.col("upper_band"))
+                    .then(-1.0)
+                    .otherwise(0.0)
+                    .alias("signal")
+                ]
+            )
+            .with_columns(
+                [pl.col("signal").diff().fill_null(0).alias("position_change")]
+            )
+            .collect()
         )
 
         return signals
