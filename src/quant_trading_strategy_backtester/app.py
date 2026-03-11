@@ -33,6 +33,7 @@ from quant_trading_strategy_backtester.optimiser import (
     optimise_strategy_params,
     run_backtest,
     run_optimisation,
+    walk_forward_optimise,
 )
 from quant_trading_strategy_backtester.streamlit_ui import (
     get_user_inputs_except_strategy_params,
@@ -123,6 +124,7 @@ def prepare_single_ticker_strategy_with_optimisation(
     strategy_type: str,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles the optimisation process for single ticker strategies.
@@ -136,6 +138,7 @@ def prepare_single_ticker_strategy_with_optimisation(
         strategy_type: The type of strategy being used.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -162,8 +165,15 @@ def prepare_single_ticker_strategy_with_optimisation(
     # Load historical data for the selected ticker
     data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
 
-    # Optimise strategy parameters if requested
-    if optimise:
+    # Optimise strategy parameters if requested.
+    if optimise and walk_forward:
+        best_params, _, _ = walk_forward_optimise(
+            data,
+            strategy_type,
+            cast(dict[str, range | list[int | float]], strategy_params),
+            best_ticker,
+        )
+    elif optimise:
         best_params, _ = optimise_strategy_params(
             data,
             strategy_type,
@@ -202,6 +212,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, int | float]]:
     """
     Handles the optimisation process for pairs trading strategy.
@@ -214,6 +225,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
         end_date: The end date for historical data.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -264,6 +276,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
             start_date,
             end_date,
             [ticker1, ticker2],
+            walk_forward=walk_forward,
         )
 
     return data, ticker_display, strategy_params
@@ -275,6 +288,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles the pairs trading strategy for user-selected tickers.
@@ -288,6 +302,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
         end_date: The end date for historical data.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -308,6 +323,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
             start_date,
             end_date,
             [ticker1, ticker2],
+            walk_forward=walk_forward,
         )
 
     return data, ticker_display, strategy_params
@@ -320,6 +336,7 @@ def prepare_single_ticker_strategy(
     strategy_type: str,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles strategies for a single ticker.
@@ -334,6 +351,7 @@ def prepare_single_ticker_strategy(
         strategy_type: The type of strategy being used.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -347,7 +365,13 @@ def prepare_single_ticker_strategy(
 
     if optimise and strategy_type != "Buy and Hold":
         strategy_params, _ = run_optimisation(
-            data, strategy_type, strategy_params, start_date, end_date, ticker
+            data,
+            strategy_type,
+            strategy_params,
+            start_date,
+            end_date,
+            ticker,
+            walk_forward=walk_forward,
         )
     elif optimise and strategy_type == "Buy and Hold":
         top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
@@ -480,7 +504,9 @@ def main():
     ticker, start_date, end_date, strategy_type, auto_select_tickers = (
         get_user_inputs_except_strategy_params()
     )
-    optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
+    optimise, walk_forward, strategy_params = get_user_inputs_for_strategy_params(
+        strategy_type
+    )
 
     # Initialise company names
     company_name1 = None
@@ -490,7 +516,7 @@ def main():
     if strategy_type == "Pairs Trading" and auto_select_tickers:
         data, ticker_display, strategy_params = (
             prepare_pairs_trading_strategy_with_optimisation(
-                start_date, end_date, strategy_params, optimise
+                start_date, end_date, strategy_params, optimise, walk_forward
             )
         )
         # Update company names with the selected pair
@@ -505,6 +531,7 @@ def main():
                 end_date,
                 strategy_params,
                 optimise,
+                walk_forward,
             )
         )
         ticker1, ticker2 = cast(tuple[str, str], ticker)
@@ -517,7 +544,12 @@ def main():
     ):
         data, ticker_display, strategy_params = (
             prepare_single_ticker_strategy_with_optimisation(
-                start_date, end_date, strategy_type, strategy_params, optimise
+                start_date,
+                end_date,
+                strategy_type,
+                strategy_params,
+                optimise,
+                walk_forward,
             )
         )
         company_name1 = get_full_company_name(ticker_display)
@@ -529,6 +561,7 @@ def main():
             strategy_type,
             strategy_params,
             optimise,
+            walk_forward,
         )
         company_name1 = get_full_company_name(ticker_display)
 

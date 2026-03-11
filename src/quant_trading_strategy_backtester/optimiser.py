@@ -42,6 +42,7 @@ def run_optimisation(
     start_date: datetime.date,
     end_date: datetime.date,
     tickers: str | list[str],
+    walk_forward: bool = False,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """
     Runs the optimisation process for strategy parameters or ticker selection.
@@ -53,6 +54,7 @@ def run_optimisation(
         start_date: Start date for historical data.
         end_date: End date for historical data.
         tickers: The ticker or tickers used in the backtest.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -68,6 +70,14 @@ def run_optimisation(
             top_companies, start_date, end_date
         )
         st.success(f"Best ticker for Buy and Hold: {best_ticker}")
+    elif walk_forward:
+        strategy_params, metrics, fold_results = walk_forward_optimise(
+            data,
+            strategy_type,
+            cast(dict[str, range | list[int | float]], strategy_params),
+            tickers,
+        )
+        _display_walk_forward_results(fold_results)
     else:
         strategy_params, metrics = optimise_strategy_params(
             data,
@@ -84,6 +94,33 @@ def run_optimisation(
     st.write(strategy_params)
 
     return strategy_params, metrics
+
+
+def _display_walk_forward_results(fold_results: list[dict]) -> None:
+    """
+    Display per-fold walk-forward validation results in the Streamlit
+    UI.
+
+    Args:
+        fold_results: List of per-fold result dictionaries from
+            walk_forward_optimise().
+    """
+    with st.expander("Walk-Forward Validation Details"):
+        for fold in fold_results:
+            st.subheader(f"Fold {fold['fold']}")
+            st.write(
+                f"Train: {fold['train_rows']} rows, Test: {fold['test_rows']} rows"
+            )
+            st.write(f"Best params: {fold['params']}")
+            col1, col2 = st.columns(2)
+            col1.metric(
+                "In-Sample Sharpe",
+                f"{fold['in_sample_sharpe']:.4f}",
+            )
+            col2.metric(
+                "Out-of-Sample Sharpe",
+                f"{fold['oos_metrics']['Sharpe Ratio']:.4f}",
+            )
 
 
 def optimise_buy_and_hold_ticker(
