@@ -18,6 +18,8 @@ from quant_trading_strategy_backtester.models import Session
 from quant_trading_strategy_backtester.models import StrategyModel as StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
+TRADING_DAYS_PER_YEAR = 252
+
 
 def is_running_locally() -> bool:
     """
@@ -168,8 +170,8 @@ class Backtester:
             - 1
         )
 
-        # Measure the risk-adjusted return, assuming 252 trading days per year.
-        periods = 252
+        # Measure the risk-adjusted return.
+        periods = TRADING_DAYS_PER_YEAR
         rf_daily = (1 + risk_free_return_rate_annual) ** (1 / periods) - 1
         excess = self.results["strategy_returns"].cast(pl.Float64) - rf_daily
         returns_mean = float(excess.mean())
@@ -204,13 +206,6 @@ class Backtester:
 
         strategy_params = self.strategy.get_parameters()
         strategy_name = self.strategy.__class__.__name__
-
-        # Extract tickers from data columns if not provided
-        if self.tickers is None:
-            if "Close_1" in self.data.columns and "Close_2" in self.data.columns:
-                pass
-            else:
-                pass
 
         # Determine start and end dates
         start_date_row = self.data.select(
