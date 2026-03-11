@@ -35,7 +35,7 @@ dev-dependencies = [
     "coverage<8.0.0,>=7.6.0",
     "pandas-stubs<3.0.0.0,>=2.2.2.240603",
     "pytest-cov<6.0.0,>=5.0.0",
-    "ty>=0.0.12",
+    "ty>=0.0.21",
 ]
 
 [tool.poe.tasks]
