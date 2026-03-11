@@ -55,7 +55,7 @@ was pre-downloaded to isolate computation from network I/O. Each run executed
 38,000 backtests (190 pairs x 200 parameter combinations) for the pairs trading
 strategy over 2020/01/01 to 2023/12/31.
 
-**Polars was faster by 2.3x on average compared to pandas.**
+**Polars was faster by 2.6x on average compared to pandas.**
 
 ![Benchmark Results](./resources/pairs_trading_benchmark_comparison.png)
 
