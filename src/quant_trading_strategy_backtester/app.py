@@ -17,7 +17,7 @@ from typing import Any, cast
 import polars as pl
 import streamlit as st
 
-from quant_trading_strategy_backtester.backtester import is_running_locally
+from quant_trading_strategy_backtester.backtester import Backtester, is_running_locally
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
@@ -26,10 +26,10 @@ from quant_trading_strategy_backtester.data import (
 )
 from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
+    create_strategy,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
-    optimise_strategy_params,
     run_backtest,
     run_optimisation,
 )
@@ -45,8 +45,24 @@ from quant_trading_strategy_backtester.visualisation import (
     display_performance_metrics,
     display_returns_by_month,
     plot_equity_curve,
+    plot_pairs_spread,
     plot_strategy_returns,
 )
+
+
+@st.cache_data
+def _cached_run_backtest(
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+) -> tuple[pl.DataFrame, dict]:
+    """
+    Cached wrapper for run_backtest to avoid recomputation on
+    Streamlit reruns.
+    """
+    return run_backtest(data, strategy_type, strategy_params, tickers)
+
 
 # Trading strategy preparation functions
 
@@ -107,6 +123,7 @@ def prepare_single_ticker_strategy_with_optimisation(
     strategy_type: str,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles the optimisation process for single ticker strategies.
@@ -120,6 +137,7 @@ def prepare_single_ticker_strategy_with_optimisation(
         strategy_type: The type of strategy being used.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -146,13 +164,16 @@ def prepare_single_ticker_strategy_with_optimisation(
     # Load historical data for the selected ticker
     data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
 
-    # Optimise strategy parameters if requested
+    # Optimise strategy parameters if requested.
     if optimise:
-        best_params, _ = optimise_strategy_params(
+        best_params, _ = run_optimisation(
             data,
             strategy_type,
-            cast(dict[str, range | list[int | float]], strategy_params),
+            strategy_params,
+            start_date,
+            end_date,
             best_ticker,
+            walk_forward=walk_forward,
         )
     else:
         best_params = {
@@ -186,6 +207,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, int | float]]:
     """
     Handles the optimisation process for pairs trading strategy.
@@ -198,6 +220,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
         end_date: The end date for historical data.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -248,6 +271,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
             start_date,
             end_date,
             [ticker1, ticker2],
+            walk_forward=walk_forward,
         )
 
     return data, ticker_display, strategy_params
@@ -259,6 +283,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles the pairs trading strategy for user-selected tickers.
@@ -272,6 +297,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
         end_date: The end date for historical data.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -292,6 +318,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
             start_date,
             end_date,
             [ticker1, ticker2],
+            walk_forward=walk_forward,
         )
 
     return data, ticker_display, strategy_params
@@ -304,6 +331,7 @@ def prepare_single_ticker_strategy(
     strategy_type: str,
     strategy_params: dict[str, Any],
     optimise: bool,
+    walk_forward: bool = False,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
     """
     Handles strategies for a single ticker.
@@ -318,6 +346,7 @@ def prepare_single_ticker_strategy(
         strategy_type: The type of strategy being used.
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -331,7 +360,13 @@ def prepare_single_ticker_strategy(
 
     if optimise and strategy_type != "Buy and Hold":
         strategy_params, _ = run_optimisation(
-            data, strategy_type, strategy_params, start_date, end_date, ticker
+            data,
+            strategy_type,
+            strategy_params,
+            start_date,
+            end_date,
+            ticker,
+            walk_forward=walk_forward,
         )
     elif optimise and strategy_type == "Buy and Hold":
         top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
@@ -464,7 +499,9 @@ def main():
     ticker, start_date, end_date, strategy_type, auto_select_tickers = (
         get_user_inputs_except_strategy_params()
     )
-    optimise, strategy_params = get_user_inputs_for_strategy_params(strategy_type)
+    optimise, walk_forward, strategy_params = get_user_inputs_for_strategy_params(
+        strategy_type
+    )
 
     # Initialise company names
     company_name1 = None
@@ -474,7 +511,7 @@ def main():
     if strategy_type == "Pairs Trading" and auto_select_tickers:
         data, ticker_display, strategy_params = (
             prepare_pairs_trading_strategy_with_optimisation(
-                start_date, end_date, strategy_params, optimise
+                start_date, end_date, strategy_params, optimise, walk_forward
             )
         )
         # Update company names with the selected pair
@@ -489,6 +526,7 @@ def main():
                 end_date,
                 strategy_params,
                 optimise,
+                walk_forward,
             )
         )
         ticker1, ticker2 = cast(tuple[str, str], ticker)
@@ -501,7 +539,12 @@ def main():
     ):
         data, ticker_display, strategy_params = (
             prepare_single_ticker_strategy_with_optimisation(
-                start_date, end_date, strategy_type, strategy_params, optimise
+                start_date,
+                end_date,
+                strategy_type,
+                strategy_params,
+                optimise,
+                walk_forward,
             )
         )
         company_name1 = get_full_company_name(ticker_display)
@@ -513,6 +556,7 @@ def main():
             strategy_type,
             strategy_params,
             optimise,
+            walk_forward,
         )
         company_name1 = get_full_company_name(ticker_display)
 
@@ -532,10 +576,35 @@ def main():
         if strategy_type == "Pairs Trading"
         else ticker_display
     )
-    results, metrics = run_backtest(data, strategy_type, strategy_params, tickers)
+    results, metrics = _cached_run_backtest(
+        data, strategy_type, strategy_params, tickers
+    )
+
+    # Save only the final backtest result, and only once per unique
+    # combination of inputs (not on every Streamlit rerun).
+    _save_key = f"{strategy_type}:{strategy_params}:{tickers}"
+    if st.session_state.get("_last_saved_key") != _save_key:
+        strategy = create_strategy(strategy_type, strategy_params)
+        backtester = Backtester(data, strategy, tickers=tickers)
+        backtester.results = results
+        backtester.save_results()
+        st.session_state["_last_saved_key"] = _save_key
 
     display_performance_metrics(metrics, company_display)
-    plot_equity_curve(results, ticker_display, company_display)
+    plot_equity_curve(
+        results,
+        ticker_display,
+        company_display,
+        is_pairs=strategy_type == "Pairs Trading",
+    )
+    if strategy_type == "Pairs Trading":
+        plot_pairs_spread(
+            results,
+            ticker_display,
+            company_display,
+            entry_z_score=float(strategy_params.get("entry_z_score", 2.0)),
+            exit_z_score=float(strategy_params.get("exit_z_score", 0.5)),
+        )
     plot_strategy_returns(results, ticker_display, company_display)
     display_returns_by_month(results)
 

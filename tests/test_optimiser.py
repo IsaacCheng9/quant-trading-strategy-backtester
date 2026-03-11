@@ -18,6 +18,7 @@ from quant_trading_strategy_backtester.optimiser import (
     optimise_single_ticker_strategy_ticker,
     run_backtest,
     run_optimisation,
+    walk_forward_optimise,
 )
 
 
@@ -434,7 +435,7 @@ def test_prepare_single_ticker_strategy_with_optimisation(monkeypatch):
     def mock_load_data(*args, **kwargs):
         return mock_polars_data
 
-    def mock_optimise_strategy_params(*args, **kwargs):
+    def mock_run_optimisation(*args, **kwargs):
         return {"short_window": 15, "long_window": 60}, {"Sharpe Ratio": 1.8}
 
     monkeypatch.setattr(
@@ -450,8 +451,8 @@ def test_prepare_single_ticker_strategy_with_optimisation(monkeypatch):
         mock_load_data,
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.optimise_strategy_params",
-        mock_optimise_strategy_params,
+        "quant_trading_strategy_backtester.app.run_optimisation",
+        mock_run_optimisation,
     )
 
     start_date = datetime.date(2020, 1, 1)
@@ -532,3 +533,70 @@ def test_prepare_single_ticker_strategy_with_optimisation_no_param_optimisation(
     assert ticker_display == "AAPL"
     assert isinstance(final_params, dict)
     assert final_params == strategy_params  # Parameters should remain unchanged
+
+
+def test_walk_forward_optimise():
+    """
+    Verify that walk-forward optimisation returns per-fold results with
+    out-of-sample metrics and stable structure.
+    """
+    # 60 rows gives 10 rows per segment with n_folds=5.
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(60)]
+    closes = [100.0 + i * 0.5 for i in range(60)]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+
+    parameter_ranges: dict[str, range | list[int | float]] = {
+        "short_window": [3, 5],
+        "long_window": [10, 15],
+    }
+
+    best_params, agg_metrics, fold_results = walk_forward_optimise(
+        data,
+        "Moving Average Crossover",
+        parameter_ranges,
+        tickers="TEST",
+        n_folds=3,
+    )
+
+    # Check structure.
+    assert isinstance(best_params, dict)
+    assert set(best_params.keys()) == {"short_window", "long_window"}
+    assert isinstance(agg_metrics, dict)
+    assert "Total Return" in agg_metrics
+    assert "Sharpe Ratio" in agg_metrics
+    assert "Max Drawdown" in agg_metrics
+    assert len(fold_results) == 3
+
+    # Each fold should have the expected keys.
+    for fold in fold_results:
+        assert "fold" in fold
+        assert "train_rows" in fold
+        assert "test_rows" in fold
+        assert "params" in fold
+        assert "in_sample_sharpe" in fold
+        assert "oos_metrics" in fold
+
+    # Training window should expand across folds.
+    assert fold_results[0]["train_rows"] < fold_results[1]["train_rows"]
+    assert fold_results[1]["train_rows"] < fold_results[2]["train_rows"]
+
+    # Best params should come from the final fold.
+    assert best_params == fold_results[-1]["params"]
+
+
+def test_walk_forward_optimise_insufficient_data():
+    """
+    Verify that walk-forward raises ValueError when data is too small
+    for the requested number of folds.
+    """
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(5)]
+    data = pl.DataFrame({"Date": dates, "Close": [100.0 + i for i in range(5)]})
+
+    with pytest.raises(ValueError, match="Not enough data"):
+        walk_forward_optimise(
+            data,
+            "Moving Average Crossover",
+            {"short_window": [3], "long_window": [10]},
+            tickers="TEST",
+            n_folds=5,
+        )

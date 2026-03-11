@@ -42,6 +42,7 @@ def run_optimisation(
     start_date: datetime.date,
     end_date: datetime.date,
     tickers: str | list[str],
+    walk_forward: bool = False,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """
     Runs the optimisation process for strategy parameters or ticker selection.
@@ -53,6 +54,7 @@ def run_optimisation(
         start_date: Start date for historical data.
         end_date: End date for historical data.
         tickers: The ticker or tickers used in the backtest.
+        walk_forward: Whether to use walk-forward validation.
 
     Returns:
         A tuple containing:
@@ -68,6 +70,14 @@ def run_optimisation(
             top_companies, start_date, end_date
         )
         st.success(f"Best ticker for Buy and Hold: {best_ticker}")
+    elif walk_forward:
+        strategy_params, metrics, fold_results = walk_forward_optimise(
+            data,
+            strategy_type,
+            cast(dict[str, range | list[int | float]], strategy_params),
+            tickers,
+        )
+        _display_walk_forward_results(fold_results)
     else:
         strategy_params, metrics = optimise_strategy_params(
             data,
@@ -84,6 +94,33 @@ def run_optimisation(
     st.write(strategy_params)
 
     return strategy_params, metrics
+
+
+def _display_walk_forward_results(fold_results: list[dict]) -> None:
+    """
+    Display per-fold walk-forward validation results in the Streamlit
+    UI.
+
+    Args:
+        fold_results: List of per-fold result dictionaries from
+            walk_forward_optimise().
+    """
+    with st.expander("Walk-Forward Validation Details"):
+        for fold in fold_results:
+            st.subheader(f"Fold {fold['fold']}")
+            st.write(
+                f"Train: {fold['train_rows']} rows, Test: {fold['test_rows']} rows"
+            )
+            st.write(f"Best params: {fold['params']}")
+            col1, col2 = st.columns(2)
+            col1.metric(
+                "In-Sample Sharpe",
+                f"{fold['in_sample_sharpe']:.4f}",
+            )
+            col2.metric(
+                "Out-of-Sample Sharpe",
+                f"{fold['oos_metrics']['Sharpe Ratio']:.4f}",
+            )
 
 
 def optimise_buy_and_hold_ticker(
@@ -336,6 +373,99 @@ def optimise_pairs_trading_tickers(
         raise ValueError("Pairs trading optimisation failed")
 
     return best_pair, best_params, best_metrics
+
+
+def walk_forward_optimise(
+    data: pl.DataFrame,
+    strategy_type: str,
+    parameter_ranges: dict[str, range | list[int | float]],
+    tickers: str | list[str],
+    n_folds: int = 5,
+) -> tuple[dict[str, int | float], dict[str, float], list[dict]]:
+    """
+    Optimises strategy parameters using walk-forward validation.
+
+    Splits data into (n_folds + 1) equal segments. For each fold, we use an
+    expanding training window for grid search and evaluate the best parameters
+    on the next segment. This tests parameter stability across time rather than
+    depending on a single split point.
+
+    Args:
+        data: Historical price data.
+        strategy_type: The type of strategy to optimise.
+        parameter_ranges: A dictionary of parameters and their
+            possible values to test.
+        tickers: The ticker or tickers used in the backtest.
+        n_folds: Number of out-of-sample test folds.
+
+    Returns:
+        A tuple containing:
+            - Best parameters from the final fold.
+            - Aggregated out-of-sample metrics (mean across folds).
+            - Per-fold results with params and metrics.
+    """
+    n_rows = len(data)
+    segment_size = n_rows // (n_folds + 1)
+    if segment_size < 2:
+        raise ValueError(
+            f"Not enough data for {n_folds} folds: "
+            f"{n_rows} rows, need at least {2 * (n_folds + 1)}"
+        )
+
+    param_names = list(parameter_ranges.keys())
+    param_values = [
+        list(v) if isinstance(v, range) else v for v in parameter_ranges.values()
+    ]
+    param_combinations = list(itertools.product(*param_values))
+
+    fold_results: list[dict] = []
+
+    for fold in range(n_folds):
+        train_end = segment_size * (fold + 1)
+        test_end = min(segment_size * (fold + 2), n_rows)
+        train_data = data[:train_end]
+        test_data = data[train_end:test_end]
+
+        # Grid search on training data.
+        best_sharpe = float("-inf")
+        best_params: dict[str, int | float] | None = None
+        for params in param_combinations:
+            current_params = dict(zip(param_names, params))
+            _, metrics = run_backtest(
+                train_data, strategy_type, current_params, tickers
+            )
+            if metrics["Sharpe Ratio"] > best_sharpe:
+                best_sharpe = metrics["Sharpe Ratio"]
+                best_params = current_params
+
+        if best_params is None:
+            raise ValueError(f"Walk-forward optimisation failed on fold {fold + 1}")
+
+        # Evaluate best params on out-of-sample test data.
+        _, oos_metrics = run_backtest(test_data, strategy_type, best_params, tickers)
+
+        fold_results.append(
+            {
+                "fold": fold + 1,
+                "train_rows": len(train_data),
+                "test_rows": len(test_data),
+                "params": best_params,
+                "in_sample_sharpe": best_sharpe,
+                "oos_metrics": oos_metrics,
+            }
+        )
+
+    # Aggregate out-of-sample metrics across folds.
+    metric_keys = fold_results[0]["oos_metrics"].keys()
+    aggregated_metrics = {
+        key: sum(f["oos_metrics"][key] for f in fold_results) / n_folds
+        for key in metric_keys
+    }
+
+    # Return best params from the final fold (largest training set).
+    final_params = fold_results[-1]["params"]
+
+    return final_params, aggregated_metrics, fold_results
 
 
 def run_backtest(

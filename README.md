@@ -39,6 +39,9 @@ _Try the deployed app
 - Support for multiple trading strategies with customisable parameters
 - Real-time data fetching from Yahoo Finance
 - Automatic optimisation of strategy parameters and stock selection from S&P 500
+- Walk-forward validation for parameter optimisation with expanding training
+  windows
+- Configurable transaction costs and slippage modelling
 - Visualisation of equity curves and strategy returns
 - Performance metrics including Total Return, Sharpe Ratio, and Max Drawdown
 - Monthly performance table with rolling returns

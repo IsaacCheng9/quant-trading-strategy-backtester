@@ -74,14 +74,14 @@ class Backtester:
         Runs the backtest.
 
         Generates trading signals using the strategy, calculates returns,
-        stores the results, and saves them to the database.
+        and stores the results. Call save_results() separately to persist
+        to the database.
 
         Returns:
             A DataFrame containing the backtest results.
         """
         signals = self.strategy.generate_signals(self.data)
         self.results = self._calculate_returns(signals)
-        self.save_results()
         return self.results
 
     def _calculate_returns(self, signals: pl.DataFrame) -> pl.DataFrame:

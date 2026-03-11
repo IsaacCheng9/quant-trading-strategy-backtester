@@ -212,6 +212,7 @@ def test_backtester_save_results(mock_db_session, mock_polars_data):
     strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
     backtester = Backtester(mock_polars_data, strategy, session=mock_db_session)
     backtester.run()
+    backtester.save_results()
 
     # Print metrics for debugging
     metrics = backtester.get_performance_metrics()
