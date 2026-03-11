@@ -61,7 +61,7 @@ class MeanReversionStrategy(BaseStrategy):
                 ]
             )
 
-        signals = (
+        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
             data.select([pl.col("Date"), pl.col("Close")])
             .lazy()
             .with_columns(

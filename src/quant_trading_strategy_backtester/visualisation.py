@@ -92,7 +92,7 @@ def display_returns_by_month(results: pl.DataFrame) -> None:
         st.write("No data available for monthly performance calculation.")
         return
 
-    monthly_returns = (
+    monthly_returns: pl.DataFrame = (  # type: ignore[invalid-assignment]
         results.lazy()
         .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)"))
         .group_by("Month (YYYY-MM)")
@@ -117,7 +117,7 @@ def display_returns_by_month(results: pl.DataFrame) -> None:
         st.write("No monthly data available after aggregation.")
     else:
         initial_start_value = monthly_returns["start_value"][0]
-        monthly_returns = (
+        monthly_returns: pl.DataFrame = (  # type: ignore[invalid-assignment]
             monthly_returns.lazy()
             .with_columns(
                 ((pl.col("end_value") / initial_start_value - 1) * 100).alias(

@@ -108,7 +108,7 @@ class Backtester:
         else:
             raise ValueError("Data does not contain required 'Close' columns")
 
-        portfolio = (
+        portfolio: pl.DataFrame = (  # type: ignore[invalid-assignment]
             signals.lazy()
             .with_columns(
                 [

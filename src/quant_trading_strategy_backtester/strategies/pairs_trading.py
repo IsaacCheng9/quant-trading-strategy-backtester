@@ -76,7 +76,7 @@ class PairsTradingStrategy(BaseStrategy):
         if "Close_1" not in data.columns or "Close_2" not in data.columns:
             raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
 
-        signals = (
+        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
             data.select(
                 [
                     pl.col("Date"),
