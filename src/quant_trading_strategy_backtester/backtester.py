@@ -44,6 +44,8 @@ class Backtester:
         data: Historical price data.
         strategy: The trading strategy to backtest.
         initial_capital: The initial capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
         results: The results of the backtest (initialised after running).
         tickers: The ticker or tickers used in the backtest.
     """
@@ -53,12 +55,16 @@ class Backtester:
         data: pl.DataFrame,
         strategy: BaseStrategy,
         initial_capital: float = 100000.0,
+        transaction_cost_bps: float = 5.0,
+        slippage_bps: float = 3.0,
         session=None,
         tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data
         self.strategy = strategy
         self.initial_capital = initial_capital
+        self.transaction_cost_bps = transaction_cost_bps
+        self.slippage_bps = slippage_bps
         self.results: None | pl.DataFrame = None
         self.session = session or Session()
         self.tickers = tickers
@@ -127,6 +133,16 @@ class Backtester:
                     pl.col("strategy_returns")
                     .replace({float("inf"): None, float("-inf"): None})
                     .fill_null(0)
+                ]
+            )
+            # Deduct transaction costs and slippage on position changes.
+            .with_columns(
+                [
+                    (
+                        pl.col("strategy_returns")
+                        - pl.col("position_change").abs()
+                        * ((self.transaction_cost_bps + self.slippage_bps) / 10_000)
+                    ).alias("strategy_returns")
                 ]
             )
             .with_columns(
