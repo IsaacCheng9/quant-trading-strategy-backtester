@@ -17,7 +17,7 @@ from typing import Any, cast
 import polars as pl
 import streamlit as st
 
-from quant_trading_strategy_backtester.backtester import is_running_locally
+from quant_trading_strategy_backtester.backtester import Backtester, is_running_locally
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
@@ -26,6 +26,7 @@ from quant_trading_strategy_backtester.data import (
 )
 from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
+    create_strategy,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
@@ -47,6 +48,21 @@ from quant_trading_strategy_backtester.visualisation import (
     plot_equity_curve,
     plot_strategy_returns,
 )
+
+
+@st.cache_data
+def _cached_run_backtest(
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+) -> tuple[pl.DataFrame, dict]:
+    """
+    Cached wrapper for run_backtest to avoid recomputation on
+    Streamlit reruns.
+    """
+    return run_backtest(data, strategy_type, strategy_params, tickers)
+
 
 # Trading strategy preparation functions
 
@@ -532,7 +548,19 @@ def main():
         if strategy_type == "Pairs Trading"
         else ticker_display
     )
-    results, metrics = run_backtest(data, strategy_type, strategy_params, tickers)
+    results, metrics = _cached_run_backtest(
+        data, strategy_type, strategy_params, tickers
+    )
+
+    # Save only the final backtest result, and only once per unique
+    # combination of inputs (not on every Streamlit rerun).
+    _save_key = f"{strategy_type}:{strategy_params}:{tickers}"
+    if st.session_state.get("_last_saved_key") != _save_key:
+        strategy = create_strategy(strategy_type, strategy_params)
+        backtester = Backtester(data, strategy, tickers=tickers)
+        backtester.results = results
+        backtester.save_results()
+        st.session_state["_last_saved_key"] = _save_key
 
     display_performance_metrics(metrics, company_display)
     plot_equity_curve(results, ticker_display, company_display)
