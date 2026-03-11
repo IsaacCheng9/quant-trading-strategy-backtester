@@ -11,6 +11,26 @@ metrics. Developed with Python.
 _Try the deployed app
 [here on Streamlit Cloud!](https://quant-trading-strategy-backtester.streamlit.app/)_
 
+## Key Features
+
+- **Multiple trading strategies** – Buy and Hold, Mean Reversion, Moving Average
+  Crossover, and Pairs Trading
+- **Walk-forward validation** – parameter optimisation with expanding training
+  windows to reduce overfitting
+- **Automatic strategy optimisation** – grid search over parameter combinations
+  and stock selection from S&P 500
+- **Transaction costs and slippage modelling** – configurable fees and slippage
+  for realistic performance estimates
+- **Efficient data processing** – vectorised computation using Polars for
+  improved performance
+- **Interactive web-based dashboard** – Streamlit UI for strategy configuration,
+  backtesting, and analysis
+- **Trade and spread visualisation** – equity curves with trade markers and
+  pairs spread z-score charts with entry/exit threshold bands
+- **Performance metrics** – Total Return, Sharpe Ratio, Max Drawdown, and
+  monthly performance table with rolling returns
+- **Real-time data fetching** – historical market data from Yahoo Finance
+
 ## Screenshots
 
 ![Pairs Trading without Optimisation 1](./resources/screenshots/pairs_trading_no_optimisation_1.png)
@@ -25,27 +45,6 @@ _Try the deployed app
 ![Pairs Trading with Walk-Forward Optimisation 2](./resources/screenshots/pairs_trading_walk_forward_optimised_2.png)
 
 </details>
-
-## Trading Strategies Supported
-
-- Buy and Hold
-- Mean Reversion
-- Moving Average Crossover
-- Pairs Trading
-
-## Key Features
-
-- Interactive web-based dashboard using Streamlit
-- Efficient data processing using Polars for improved performance
-- Support for multiple trading strategies with customisable parameters
-- Real-time data fetching from Yahoo Finance
-- Automatic optimisation of strategy parameters and stock selection from S&P 500
-- Walk-forward validation for parameter optimisation with expanding training
-  windows
-- Configurable transaction costs and slippage modelling
-- Visualisation of equity curves and strategy returns
-- Performance metrics including Total Return, Sharpe Ratio, and Max Drawdown
-- Monthly performance table with rolling returns
 
 ## Performance Benchmark of pandas vs. Polars Implementation
 
