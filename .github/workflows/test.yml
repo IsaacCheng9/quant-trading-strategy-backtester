@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: [3.12.x]
+        python-version: [3.14.x]
 
     steps:
       - uses: actions/checkout@main
@@ -32,7 +32,9 @@ jobs:
           poetry install
 
       - name: Run unit tests with Pytest
-        run: poetry run coverage run --source=src/quant_trading_strategy_backtester -m pytest -v
+        run:
+          poetry run coverage run --source=src/quant_trading_strategy_backtester
+          -m pytest -v
 
       - name: Get code coverage report
         run: poetry run coverage report -m
