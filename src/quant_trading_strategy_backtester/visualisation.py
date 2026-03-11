@@ -25,24 +25,60 @@ def display_performance_metrics(
 
 
 def plot_equity_curve(
-    results: pl.DataFrame, ticker_display: str, company_name: str | None
+    results: pl.DataFrame,
+    ticker_display: str,
+    company_name: str | None,
+    is_pairs: bool = False,
 ) -> None:
     """
-    Plots the equity curve of the backtest.
+    Plots the equity curve with trade markers overlaid.
 
     Args:
         results: The backtest results DataFrame.
         ticker_display: The stock ticker symbol or pair to display.
         company_name: The full name of the company or companies.
+        is_pairs: Whether this is a pairs trading strategy. Changes
+            marker labels from Buy/Sell to Long/Short Spread.
     """
     st.subheader("Equity Curve")
-    fig = go.Figure(
-        data=go.Scatter(
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
             x=results["Date"].to_list(),
             y=results["equity_curve"].to_list(),
             mode="lines",
+            name="Equity",
         )
     )
+
+    # Overlay trade markers where position changes.
+    long_label = "Long Spread" if is_pairs else "Buy"
+    short_label = "Short Spread" if is_pairs else "Sell"
+    buys = results.filter(pl.col("position_change") > 0)
+    sells = results.filter(pl.col("position_change") < 0)
+
+    if not buys.is_empty():
+        fig.add_trace(
+            go.Scatter(
+                x=buys["Date"].to_list(),
+                y=buys["equity_curve"].to_list(),
+                mode="markers",
+                marker=dict(size=6, color="green", opacity=0.7),
+                name=long_label,
+            )
+        )
+    if not sells.is_empty():
+        fig.add_trace(
+            go.Scatter(
+                x=sells["Date"].to_list(),
+                y=sells["equity_curve"].to_list(),
+                mode="markers",
+                marker=dict(size=6, color="red", opacity=0.7),
+                name=short_label,
+            )
+        )
+
     fig.update_layout(
         title=f"{company_name} ({ticker_display}) Equity Curve",
         xaxis_title="Date",
@@ -75,6 +111,91 @@ def plot_strategy_returns(
         xaxis_title="Date",
         yaxis_title="Returns (%)",
         yaxis_tickformat=".2f",  # Format y-axis ticks to 2 decimal places
+    )
+    st.plotly_chart(fig)
+
+
+def plot_pairs_spread(
+    results: pl.DataFrame,
+    ticker_display: str,
+    company_name: str | None,
+    entry_z_score: float,
+    exit_z_score: float,
+) -> None:
+    """
+    Plot the z-score of the pairs spread with entry/exit threshold
+    bands and position markers.
+
+    Args:
+        results: The backtest results DataFrame (must contain
+            'z_score' and 'signal' columns).
+        ticker_display: The stock ticker pair to display.
+        company_name: The full name of the companies.
+        entry_z_score: The z-score threshold for entering a trade.
+        exit_z_score: The z-score threshold for exiting a trade.
+    """
+    if "z_score" not in results.columns:
+        return
+
+    st.subheader("Pairs Spread Z-Score")
+    dates = results["Date"].to_list()
+    z_scores = results["z_score"].to_list()
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=dates,
+            y=z_scores,
+            mode="lines",
+            name="Z-Score",
+        )
+    )
+
+    # Entry/exit threshold bands.
+    for val, label, dash in [
+        (entry_z_score, f"Entry ({entry_z_score})", "dash"),
+        (-entry_z_score, f"Entry ({-entry_z_score})", "dash"),
+        (exit_z_score, f"Exit ({exit_z_score})", "dot"),
+        (-exit_z_score, f"Exit ({-exit_z_score})", "dot"),
+    ]:
+        fig.add_hline(
+            y=val,
+            line_dash=dash,
+            line_color="grey",
+            opacity=0.6,
+            annotation_text=label,
+        )
+
+    # Mark position changes on the z-score line.
+    buys = results.filter(pl.col("position_change") > 0)
+    sells = results.filter(pl.col("position_change") < 0)
+
+    if not buys.is_empty():
+        fig.add_trace(
+            go.Scatter(
+                x=buys["Date"].to_list(),
+                y=buys["z_score"].to_list(),
+                mode="markers",
+                marker=dict(size=6, color="green", opacity=0.7),
+                name="Long Spread",
+            )
+        )
+    if not sells.is_empty():
+        fig.add_trace(
+            go.Scatter(
+                x=sells["Date"].to_list(),
+                y=sells["z_score"].to_list(),
+                mode="markers",
+                marker=dict(size=6, color="red", opacity=0.7),
+                name="Short Spread",
+            )
+        )
+
+    fig.update_layout(
+        title=(f"{company_name} ({ticker_display}) Pairs Spread Z-Score"),
+        xaxis_title="Date",
+        yaxis_title="Z-Score",
     )
     st.plotly_chart(fig)
 

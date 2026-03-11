@@ -45,6 +45,7 @@ from quant_trading_strategy_backtester.visualisation import (
     display_performance_metrics,
     display_returns_by_month,
     plot_equity_curve,
+    plot_pairs_spread,
     plot_strategy_returns,
 )
 
@@ -590,7 +591,20 @@ def main():
         st.session_state["_last_saved_key"] = _save_key
 
     display_performance_metrics(metrics, company_display)
-    plot_equity_curve(results, ticker_display, company_display)
+    plot_equity_curve(
+        results,
+        ticker_display,
+        company_display,
+        is_pairs=strategy_type == "Pairs Trading",
+    )
+    if strategy_type == "Pairs Trading":
+        plot_pairs_spread(
+            results,
+            ticker_display,
+            company_display,
+            entry_z_score=float(strategy_params.get("entry_z_score", 2.0)),
+            exit_z_score=float(strategy_params.get("exit_z_score", 0.5)),
+        )
     plot_strategy_returns(results, ticker_display, company_display)
     display_returns_by_month(results)
 
