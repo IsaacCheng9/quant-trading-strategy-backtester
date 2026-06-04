@@ -34,6 +34,54 @@ from quant_trading_strategy_backtester.strategies.pairs_trading import (
 )
 from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
 
+TRAIN_RATIO = 0.7
+WALK_FORWARD_FOLDS = 5
+
+
+def _split_data(
+    data: pl.DataFrame, train_ratio: float = TRAIN_RATIO
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """
+    Split a DataFrame into training and test sets by row count.
+
+    Args:
+        data: The full dataset to split.
+        train_ratio: Fraction of rows to use for training (default 0.7).
+
+    Returns:
+        A tuple of (train_data, test_data).
+    """
+    split_idx = int(len(data) * train_ratio)
+    return data[:split_idx], data[split_idx:]
+
+
+def get_validation_data(
+    data: pl.DataFrame, walk_forward: bool = False, n_folds: int = WALK_FORWARD_FOLDS
+) -> pl.DataFrame:
+    """
+    Return the held-out data used for final validation display.
+
+    Args:
+        data: Historical price data.
+        walk_forward: Whether the optimisation used walk-forward validation.
+        n_folds: Number of walk-forward test folds.
+
+    Returns:
+        The test split for standard optimisation, or the final test fold for
+        walk-forward optimisation.
+    """
+    if walk_forward:
+        segment_size = len(data) // (n_folds + 1)
+        if segment_size < 2:
+            raise ValueError(
+                f"Not enough data for {n_folds} folds: "
+                f"{len(data)} rows, need at least {2 * (n_folds + 1)}"
+            )
+        return data[segment_size * n_folds : segment_size * (n_folds + 1)]
+
+    _, test_data = _split_data(data)
+    return test_data
+
 
 def run_optimisation(
     data: pl.DataFrame,
@@ -79,11 +127,13 @@ def run_optimisation(
         )
         _display_walk_forward_results(fold_results)
     else:
+        train_data, test_data = _split_data(data)
         strategy_params, metrics = optimise_strategy_params(
-            data,
+            train_data,
             strategy_type,
             cast(dict[str, range | list[int | float]], strategy_params),
             tickers,
+            test_data=test_data,
         )
 
     end_time = time.time()
@@ -131,6 +181,9 @@ def optimise_buy_and_hold_ticker(
     """
     Optimises ticker selection for the Buy and Hold strategy.
 
+    Uses a 70/30 train/test split: tickers are ranked by total return on
+    training data, and the winner is re-evaluated on test data.
+
     Args:
         top_companies: List of tuples containing ticker symbols and market caps
                        of top companies.
@@ -139,10 +192,10 @@ def optimise_buy_and_hold_ticker(
 
     Returns:
         A tuple containing the best ticker, strategy parameters, and
-        performance metrics.
+        out-of-sample performance metrics.
     """
     best_ticker = None
-    best_metrics = None
+    best_test_data = None
     best_total_return = float("-inf")
 
     total_tickers = len(top_companies)
@@ -157,23 +210,30 @@ def optimise_buy_and_hold_ticker(
         if data is None or data.is_empty():
             continue
 
-        strategy = BuyAndHoldStrategy({})
-        backtester = Backtester(data, strategy, tickers=ticker)
-        backtester.run()
-        metrics = backtester.get_performance_metrics()
+        train_data, test_data = _split_data(data)
 
-        if metrics and metrics["Total Return"] > best_total_return:
-            best_total_return = metrics["Total Return"]
+        backtester = Backtester(train_data, BuyAndHoldStrategy({}), tickers=ticker)
+        backtester.run()
+        train_metrics = backtester.get_performance_metrics()
+
+        if train_metrics and train_metrics["Total Return"] > best_total_return:
+            best_total_return = train_metrics["Total Return"]
             best_ticker = ticker
-            best_metrics = metrics
+            best_test_data = test_data
 
     progress_bar.empty()
     status_text.empty()
 
-    if not best_ticker or not best_metrics:
+    if not best_ticker or best_test_data is None:
         raise ValueError("Buy and Hold optimisation failed")
 
-    return best_ticker, {}, best_metrics
+    backtester = Backtester(best_test_data, BuyAndHoldStrategy({}), tickers=best_ticker)
+    backtester.run()
+    best_test_metrics = backtester.get_performance_metrics()
+    if best_test_metrics is None:
+        raise ValueError("Buy and Hold optimisation failed")
+
+    return best_ticker, {}, best_test_metrics
 
 
 def optimise_single_ticker_strategy_ticker(
@@ -185,6 +245,9 @@ def optimise_single_ticker_strategy_ticker(
 ) -> str:
     """
     Optimises ticker selection for single ticker strategies.
+
+    Uses a 70/30 train/test split: tickers are ranked by Sharpe ratio on
+    training data.
 
     Args:
         top_companies: List of tuples containing ticker symbols and market caps
@@ -218,10 +281,11 @@ def optimise_single_ticker_strategy_ticker(
         if data is None or data.is_empty():
             continue
 
-        _, current_metrics = run_backtest(data, strategy_type, fixed_params, ticker)
+        train_data, _ = _split_data(data)
+        _, train_metrics = run_backtest(train_data, strategy_type, fixed_params, ticker)
 
-        if current_metrics["Sharpe Ratio"] > best_sharpe_ratio:
-            best_sharpe_ratio = current_metrics["Sharpe Ratio"]
+        if train_metrics["Sharpe Ratio"] > best_sharpe_ratio:
+            best_sharpe_ratio = train_metrics["Sharpe Ratio"]
             best_ticker = ticker
 
     progress_bar.empty()
@@ -238,17 +302,23 @@ def optimise_strategy_params(
     strategy_type: str,
     parameter_ranges: dict[str, range | list[int | float]],
     tickers: str | list[str],
+    test_data: pl.DataFrame | None = None,
 ) -> tuple[dict[str, int | float], dict[str, float]]:
     """
     Optimises strategy parameters by testing all combinations within given
     ranges.
 
+    Grid search runs on `data` (training set). If `test_data` is provided,
+    the best parameters are evaluated on it and out-of-sample metrics are
+    returned. Otherwise, in-sample metrics are returned.
+
     Args:
-        data: Historical price data.
+        data: Training price data for grid search.
         strategy_type: The type of strategy to optimise.
         parameter_ranges: A dictionary of parameters and their possible values
                           to test.
         tickers: The ticker or tickers used in the backtest.
+        test_data: Optional held-out test data for out-of-sample evaluation.
 
     Returns:
         A tuple containing the best parameters and their performance metrics.
@@ -288,6 +358,11 @@ def optimise_strategy_params(
     if not best_params or not best_metrics:
         raise ValueError("Parameter optimisation failed")
 
+    # Evaluate best params on held-out test data if provided.
+    if test_data is not None:
+        _, test_metrics = run_backtest(test_data, strategy_type, best_params, tickers)
+        return best_params, test_metrics
+
     return best_params, best_metrics
 
 
@@ -300,6 +375,10 @@ def optimise_pairs_trading_tickers(
 ) -> tuple[tuple[str, str], dict[str, Any], dict[str, float]]:
     """
     Optimises ticker pair selection and strategy parameters for pairs trading.
+
+    Uses a 70/30 train/test split: pairs are ranked by Sharpe ratio on
+    training data. When `optimise` is True, parameter fitting also runs
+    on training data and the winner is evaluated on test data.
 
     Args:
         top_companies: List of tuples containing ticker symbols and market caps
@@ -315,7 +394,7 @@ def optimise_pairs_trading_tickers(
     """
     best_pair = None
     best_params = None
-    best_metrics = None
+    best_test_data = None
     best_sharpe_ratio = float("-inf")
 
     ticker_pairs = list(
@@ -343,34 +422,43 @@ def optimise_pairs_trading_tickers(
         if data is None or data.is_empty():
             continue
 
+        train_data, test_data = _split_data(data)
+
         if optimise:
             # Convert single values to lists for optimisation
             param_ranges = {
                 k: [v] if isinstance(v, (int, float)) else v
                 for k, v in strategy_params.items()
             }
-            current_params, current_metrics = optimise_strategy_params(
-                data, "Pairs Trading", param_ranges, [ticker1, ticker2]
+            current_params, train_metrics = optimise_strategy_params(
+                train_data,
+                "Pairs Trading",
+                param_ranges,
+                [ticker1, ticker2],
             )
         else:
-            _, current_metrics = run_backtest(
-                data, "Pairs Trading", strategy_params, [ticker1, ticker2]
+            _, train_metrics = run_backtest(
+                train_data, "Pairs Trading", strategy_params, [ticker1, ticker2]
             )
             current_params = strategy_params
 
-        if current_metrics["Sharpe Ratio"] > best_sharpe_ratio:
-            best_sharpe_ratio = current_metrics["Sharpe Ratio"]
+        if train_metrics["Sharpe Ratio"] > best_sharpe_ratio:
+            best_sharpe_ratio = train_metrics["Sharpe Ratio"]
             best_pair = (ticker1, ticker2)
             best_params = current_params
-            best_metrics = current_metrics
+            best_test_data = test_data
 
         end_time = time.time()
         prev_pair_processing_time = end_time - start_time
 
     progress_bar.empty()
     status_text.empty()
-    if not best_pair or not best_params or not best_metrics:
+    if not best_pair or not best_params or best_test_data is None:
         raise ValueError("Pairs trading optimisation failed")
+
+    _, best_metrics = run_backtest(
+        best_test_data, "Pairs Trading", best_params, list(best_pair)
+    )
 
     return best_pair, best_params, best_metrics
 
@@ -380,7 +468,7 @@ def walk_forward_optimise(
     strategy_type: str,
     parameter_ranges: dict[str, range | list[int | float]],
     tickers: str | list[str],
-    n_folds: int = 5,
+    n_folds: int = WALK_FORWARD_FOLDS,
 ) -> tuple[dict[str, int | float], dict[str, float], list[dict]]:
     """
     Optimises strategy parameters using walk-forward validation.

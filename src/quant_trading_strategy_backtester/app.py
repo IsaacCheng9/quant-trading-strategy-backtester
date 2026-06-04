@@ -27,6 +27,7 @@ from quant_trading_strategy_backtester.data import (
 from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
     create_strategy,
+    get_validation_data,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
@@ -62,6 +63,34 @@ def _cached_run_backtest(
     Streamlit reruns.
     """
     return run_backtest(data, strategy_type, strategy_params, tickers)
+
+
+def _get_final_backtest_data(
+    data: pl.DataFrame, use_validation_data: bool, walk_forward: bool
+) -> pl.DataFrame:
+    """
+    Return the data used for the displayed and saved final backtest.
+
+    Args:
+        data: Full historical price data.
+        use_validation_data: Whether ticker selection or parameter optimisation
+            has already used the training period.
+        walk_forward: Whether parameter optimisation used walk-forward
+            validation.
+
+    Returns:
+        Full data for plain backtests, or held-out validation data for
+        optimised backtests.
+    """
+    if not use_validation_data:
+        return data
+
+    validation_data = get_validation_data(data, walk_forward=walk_forward)
+    if walk_forward:
+        st.info("Displaying final walk-forward test-fold backtest results.")
+    else:
+        st.info("Displaying held-out test-period backtest results.")
+    return validation_data
 
 
 # Trading strategy preparation functions
@@ -166,6 +195,13 @@ def prepare_single_ticker_strategy_with_optimisation(
 
     # Optimise strategy parameters if requested.
     if optimise:
+        if not walk_forward:
+            st.warning(
+                "Parameter optimisation without walk-forward validation "
+                "uses a single 70/30 train/test split. Results may still "
+                "be partially in-sample. Enable walk-forward validation "
+                "for more robust out-of-sample evaluation."
+            )
         best_params, _ = run_optimisation(
             data,
             strategy_type,
@@ -262,6 +298,14 @@ def prepare_pairs_trading_strategy_with_optimisation(
             [ticker1, ticker2],
             walk_forward=walk_forward,
         )
+    elif optimise and not walk_forward:
+        st.warning(
+            "Parameter optimisation without walk-forward validation "
+            "uses a single 70/30 train/test split. Results may still "
+            "be partially in-sample. Enable walk-forward validation "
+            "for more robust out-of-sample evaluation."
+        )
+        strategy_params = selected_strategy_params
     else:
         strategy_params = selected_strategy_params
 
@@ -515,7 +559,11 @@ def main():
     if strategy_type == "Pairs Trading" and auto_select_tickers:
         data, ticker_display, strategy_params = (
             prepare_pairs_trading_strategy_with_optimisation(
-                start_date, end_date, strategy_params, optimise, walk_forward
+                start_date,
+                end_date,
+                strategy_params,
+                optimise,
+                walk_forward,
             )
         )
         # Update company names with the selected pair
@@ -580,8 +628,16 @@ def main():
         if strategy_type == "Pairs Trading"
         else ticker_display
     )
+    use_validation_data = auto_select_tickers or optimise
+    backtest_data = _get_final_backtest_data(
+        data, use_validation_data, walk_forward=walk_forward
+    )
+    if backtest_data.is_empty():
+        st.write("No validation data available for the selected ticker and date range")
+        return
+
     results, metrics = _cached_run_backtest(
-        data, strategy_type, strategy_params, tickers
+        backtest_data, strategy_type, strategy_params, tickers
     )
 
     # Save only the final backtest result, and only once per unique
@@ -589,7 +645,7 @@ def main():
     _save_key = f"{strategy_type}:{strategy_params}:{tickers}"
     if st.session_state.get("_last_saved_key") != _save_key:
         strategy = create_strategy(strategy_type, strategy_params)
-        backtester = Backtester(data, strategy, tickers=tickers)
+        backtester = Backtester(backtest_data, strategy, tickers=tickers)
         backtester.results = results
         backtester.save_results()
         st.session_state["_last_saved_key"] = _save_key
@@ -615,7 +671,7 @@ def main():
     # Display the raw data from Yahoo Finance for the backtest period
     st.header(f"Raw Data for {company_display}")
     st.dataframe(
-        data.to_pandas(),
+        backtest_data.to_pandas(),
         width="stretch",
         hide_index=True,
     )

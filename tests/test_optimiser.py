@@ -8,14 +8,18 @@ from typing import Any
 import polars as pl
 import pytest
 from quant_trading_strategy_backtester.app import (
+    _get_final_backtest_data,
     prepare_buy_and_hold_strategy_with_optimisation,
     prepare_pairs_trading_strategy_with_optimisation,
     prepare_single_ticker_strategy_with_optimisation,
 )
 from quant_trading_strategy_backtester.optimiser import (
+    _split_data,
+    get_validation_data,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
+    optimise_strategy_params,
     run_backtest,
     run_optimisation,
     walk_forward_optimise,
@@ -181,6 +185,14 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         mock_load_data,
     )
     monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.is_same_company",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
     )
     monkeypatch.setattr(
@@ -218,6 +230,150 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
     assert isinstance(best_params, dict)
     # Should be the same as input when not optimising
     assert best_params == strategy_params
+
+
+def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
+    """Verify fixed-parameter pair selection ignores held-out test metrics."""
+    mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
+    mock_polars_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close_1": [100.0 + i for i in range(10)],
+            "Close_2": [200.0 + i for i in range(10)],
+        }
+    )
+    strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    train_scores = {
+        ("AAPL", "GOOGL"): 1.0,
+        ("AAPL", "MSFT"): 2.0,
+        ("GOOGL", "MSFT"): 0.5,
+    }
+    test_scores = {
+        ("AAPL", "GOOGL"): 99.0,
+        ("AAPL", "MSFT"): -1.0,
+        ("GOOGL", "MSFT"): 0.0,
+    }
+
+    def mock_load_data(*args, **kwargs):
+        return mock_polars_data
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        pair = tuple(tickers)
+        scores = train_scores if len(data) == 7 else test_scores
+        return None, {
+            "Sharpe Ratio": scores[pair],
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.is_same_company",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    best_pair, best_params, metrics = optimise_pairs_trading_tickers(
+        mock_top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 12, 31),
+        strategy_params,
+        optimise=False,
+    )
+
+    assert best_pair == ("AAPL", "MSFT")
+    assert best_params == strategy_params
+    assert metrics["Sharpe Ratio"] == -1.0
+
+
+def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
+    monkeypatch,
+):
+    """Verify optimised pair selection does not pass test data into grid search."""
+    mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
+    mock_polars_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close_1": [100.0 + i for i in range(10)],
+            "Close_2": [200.0 + i for i in range(10)],
+        }
+    )
+    strategy_params = {"window": [20, 30], "entry_z_score": [2.0], "exit_z_score": [0.5]}
+    train_scores = {
+        ("AAPL", "GOOGL"): 1.0,
+        ("AAPL", "MSFT"): 2.0,
+        ("GOOGL", "MSFT"): 0.5,
+    }
+
+    def mock_load_data(*args, **kwargs):
+        return mock_polars_data
+
+    def mock_optimise_strategy_params(
+        data,
+        strategy_type,
+        parameter_ranges,
+        tickers,
+        test_data=None,
+    ):
+        assert test_data is None
+        assert len(data) == 7
+        pair = tuple(tickers)
+        return {
+            "window": 20,
+            "entry_z_score": 2.0,
+            "exit_z_score": 0.5,
+        }, {
+            "Sharpe Ratio": train_scores[pair],
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        assert len(data) == 3
+        return None, {
+            "Sharpe Ratio": -1.0,
+            "Total Return": 0.01,
+            "Max Drawdown": -0.02,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.is_same_company",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.optimise_strategy_params",
+        mock_optimise_strategy_params,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    best_pair, best_params, metrics = optimise_pairs_trading_tickers(
+        mock_top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 12, 31),
+        strategy_params,
+        optimise=True,
+    )
+
+    assert best_pair == ("AAPL", "MSFT")
+    assert best_params == {
+        "window": 20,
+        "entry_z_score": 2.0,
+        "exit_z_score": 0.5,
+    }
+    assert metrics["Sharpe Ratio"] == -1.0
 
 
 def test_handle_pairs_trading_optimisation(monkeypatch):
@@ -671,3 +827,187 @@ def test_walk_forward_optimise_insufficient_data():
             tickers="TEST",
             n_folds=5,
         )
+
+
+def test_split_data():
+    """Verify _split_data splits at the correct ratio."""
+    data = pl.DataFrame({"Close": list(range(100))})
+    train, test = _split_data(data, train_ratio=0.7)
+    assert len(train) == 70
+    assert len(test) == 30
+    assert train["Close"][0] == 0
+    assert train["Close"][-1] == 69
+    assert test["Close"][0] == 70
+    assert test["Close"][-1] == 99
+
+
+def test_split_data_small_dataset():
+    """Verify _split_data handles small datasets."""
+    data = pl.DataFrame({"Close": [1, 2, 3]})
+    train, test = _split_data(data, train_ratio=0.7)
+    assert len(train) == 2
+    assert len(test) == 1
+
+
+def test_get_validation_data_standard_split():
+    """Verify standard optimisation validation uses the 30% test split."""
+    data = pl.DataFrame({"Close": list(range(100))})
+    validation_data = get_validation_data(data)
+    assert len(validation_data) == 30
+    assert validation_data["Close"][0] == 70
+    assert validation_data["Close"][-1] == 99
+
+
+def test_get_validation_data_walk_forward():
+    """Verify walk-forward validation uses the final test fold."""
+    data = pl.DataFrame({"Close": list(range(60))})
+    validation_data = get_validation_data(data, walk_forward=True, n_folds=5)
+    assert len(validation_data) == 10
+    assert validation_data["Close"][0] == 50
+    assert validation_data["Close"][-1] == 59
+
+
+def test_get_final_backtest_data_uses_validation_split():
+    """Verify optimised app results use validation-period data."""
+    data = pl.DataFrame({"Close": list(range(100))})
+    validation_data = _get_final_backtest_data(
+        data, use_validation_data=True, walk_forward=False
+    )
+    full_data = _get_final_backtest_data(
+        data, use_validation_data=False, walk_forward=False
+    )
+
+    assert len(validation_data) == 30
+    assert validation_data["Close"][0] == 70
+    assert len(full_data) == 100
+
+
+def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
+    """Verify optimise_strategy_params evaluates best params on test data."""
+    train_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
+            "Close": [100 + i for i in range(21)],
+        }
+    )
+    test_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 2, i) for i in range(1, 11)],
+            "Close": [120 + i for i in range(10)],
+        }
+    )
+
+    call_log = []
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        call_log.append(("backtest", len(data)))
+        # Return different metrics for train vs test
+        if len(data) == 21:
+            return None, {
+                "Sharpe Ratio": 1.0,
+                "Total Return": 0.1,
+                "Max Drawdown": -0.05,
+            }
+        else:
+            return None, {
+                "Sharpe Ratio": 0.5,
+                "Total Return": 0.05,
+                "Max Drawdown": -0.03,
+            }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    params, metrics = optimise_strategy_params(
+        train_data,
+        "Moving Average Crossover",
+        {"short_window": [5], "long_window": [20]},
+        "AAPL",
+        test_data=test_data,
+    )
+
+    # Should have run backtests for each param combo on train + once on test
+    assert len(call_log) == 2  # 1 train combo + 1 test eval
+    assert call_log[0] == ("backtest", 21)  # train
+    assert call_log[1] == ("backtest", 10)  # test
+    # Metrics should be from test data
+    assert metrics["Sharpe Ratio"] == 0.5
+    assert metrics["Total Return"] == 0.05
+
+
+def test_optimise_buy_and_hold_ticker_uses_train_test_split(monkeypatch):
+    """Verify buy-and-hold ticker selection uses train for ranking, test for eval."""
+    mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0)]
+
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(100)]
+    mock_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close": [100.0 + i for i in range(100)],
+        }
+    )
+
+    def mock_load_data(*args, **kwargs):
+        return mock_data
+
+    split_calls = []
+    original_split = _split_data
+
+    def tracking_split(data, train_ratio=0.7):
+        train, test = original_split(data, train_ratio)
+        split_calls.append((len(train), len(test)))
+        return train, test
+
+    backtest_calls = []
+
+    class MockBacktester:
+        def __init__(self, data, strategy, tickers):
+            self.tickers = tickers
+            backtest_calls.append(len(data))
+
+        def run(self):
+            return None
+
+        def get_performance_metrics(self):
+            returns = {"AAPL": 0.3, "GOOGL": 0.2}
+            return {
+                "Total Return": returns.get(self.tickers, 0.1),
+                "Sharpe Ratio": 1.5,
+                "Max Drawdown": -0.1,
+            }
+
+    def mock_backtest_init(data, strategy, tickers):
+        returns = {"AAPL": 0.3, "GOOGL": 0.2}
+        assert tickers in returns
+        return MockBacktester(data, strategy, tickers)
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.data.load_yfinance_data_one_ticker",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_one_ticker",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser._split_data", tracking_split
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.Backtester", mock_backtest_init
+    )
+
+    best_ticker, params, metrics = optimise_buy_and_hold_ticker(
+        mock_top_companies, datetime.date(2020, 1, 1), datetime.date(2020, 12, 31)
+    )
+
+    assert best_ticker == "AAPL"
+    assert params == {}
+    assert metrics["Total Return"] == 0.3
+    assert backtest_calls == [70, 70, 30]
+    # Verify _split_data was called (train/test split happened)
+    assert len(split_calls) >= 1
+    train_size, test_size = split_calls[0]
+    assert train_size + test_size == 100
+    assert train_size == 70  # 70% of 100
+    assert test_size == 30  # 30% of 100

@@ -32,6 +32,17 @@ _Try the deployed app
 - **Real-time data fetching** – adjusted historical market data from Yahoo
   Finance
 
+## Methodology Notes
+
+- **Ticker/pair selection** uses a 70/30 train/test split – tickers are
+  selected on training data and evaluated on held-out test data to reduce
+  look-ahead bias
+- **Walk-forward validation** uses expanding training windows for more
+  robust out-of-sample evaluation – recommended over the default split
+- **Survivorship bias** remains a limitation – automatic ticker selection uses
+  today's S&P 500 constituents, so historical results can still be biased
+  towards companies that survived to the current index
+
 ## Screenshots
 
 ![Pairs Trading without Optimisation 1](./resources/screenshots/pairs_trading_no_optimisation_1.png)

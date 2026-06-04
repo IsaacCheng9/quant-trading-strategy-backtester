@@ -104,8 +104,7 @@ def get_ticker_market_cap(ticker: str) -> tuple[str, float | None]:
 @st.cache_data
 def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     """
-    Fetches the top X companies in the S&P 500 index by market cap using
-    yfinance.
+    Fetches the top X companies in the S&P 500 index by market cap.
 
     Args:
         num_companies: The number of top companies to fetch.

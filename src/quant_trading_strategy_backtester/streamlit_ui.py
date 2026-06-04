@@ -22,7 +22,7 @@ def get_user_inputs_except_strategy_params() -> tuple[
 
     Returns:
         A tuple containing the ticker symbol(s), start date, end date, strategy
-        type, and a boolean indicating whether to use automatic ticker
+        type, a boolean indicating whether to use automatic ticker
         selection for pairs trading or buy and hold.
     """
     strategy_type = st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
@@ -63,7 +63,13 @@ def get_user_inputs_except_strategy_params() -> tuple[
     start_date = st.sidebar.date_input("Start Date", value=datetime.date(2020, 1, 1))
     end_date = st.sidebar.date_input("End Date", value=datetime.date(2023, 12, 31))
 
-    return ticker, start_date, end_date, strategy_type, auto_select_tickers
+    return (
+        ticker,
+        start_date,
+        end_date,
+        strategy_type,
+        auto_select_tickers,
+    )
 
 
 def get_optimisation_ranges(strategy_type: str) -> dict[str, Any]:
@@ -179,7 +185,8 @@ def get_user_inputs_for_strategy_params(
             help=(
                 "Split data into multiple folds and optimise on "
                 "each training window, then evaluate out-of-sample."
-                " Shows parameter stability over time."
+                " Shows parameter stability over time. Without this,"
+                " optimisation uses a single 70/30 train/test split."
             ),
         )
     else:
