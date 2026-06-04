@@ -240,39 +240,43 @@ def prepare_pairs_trading_strategy_with_optimisation(
     with st.spinner("Fetching top S&P 500 companies..."):
         top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_TWO_TICKERS)
 
-    # Optimise ticker pair selection and strategy parameters
-    ticker, strategy_params, _ = optimise_pairs_trading_tickers(
+    parameter_ranges = strategy_params
+
+    # Optimise ticker pair selection and strategy parameters.
+    ticker, selected_strategy_params, _ = optimise_pairs_trading_tickers(
         top_companies, start_date, end_date, strategy_params, optimise
     )
     ticker1, ticker2 = ticker
 
-    # Calculate and display the time taken for optimisation
+    # Load historical data for the selected pair.
+    data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+    ticker_display = f"{ticker1} vs. {ticker2}"
+
+    if optimise and walk_forward:
+        strategy_params, _ = run_optimisation(
+            data,
+            "Pairs Trading",
+            parameter_ranges,
+            start_date,
+            end_date,
+            [ticker1, ticker2],
+            walk_forward=walk_forward,
+        )
+    else:
+        strategy_params = selected_strategy_params
+
+    # Calculate and display the time taken for optimisation.
     end_time = time.time()
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
 
-    # Display the optimal tickers and parameters
+    # Display the optimal tickers and parameters.
     st.header("Optimal Tickers and Parameters")
     tickers_and_strategy_params = {
         "ticker1": ticker1,
         "ticker2": ticker2,
     } | strategy_params
     st.write(tickers_and_strategy_params)
-
-    # Load historical data for the selected pair
-    data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
-    ticker_display = f"{ticker1} vs. {ticker2}"
-
-    if optimise:
-        strategy_params, _ = run_optimisation(
-            data,
-            "Pairs Trading",
-            strategy_params,
-            start_date,
-            end_date,
-            [ticker1, ticker2],
-            walk_forward=walk_forward,
-        )
 
     return data, ticker_display, strategy_params
 

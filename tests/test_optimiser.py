@@ -241,10 +241,7 @@ def test_handle_pairs_trading_optimisation(monkeypatch):
         return mock_polars_data
 
     def mock_run_optimisation(*args, **kwargs):
-        return (
-            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
-            {"Sharpe Ratio": 1.5, "Total Return": 0.2, "Max Drawdown": -0.1},
-        )
+        raise AssertionError("Pair optimisation should not run a second grid search")
 
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app.get_top_sp500_companies",
@@ -284,6 +281,80 @@ def test_handle_pairs_trading_optimisation(monkeypatch):
     assert optimised_params["window"] == 20
     assert optimised_params["entry_z_score"] == 2.0
     assert optimised_params["exit_z_score"] == 0.5
+
+
+def test_handle_pairs_trading_walk_forward_uses_original_ranges(monkeypatch):
+    mock_polars_data = pl.DataFrame(
+        {"Close_1": [100, 101, 102], "Close_2": [200, 202, 204]}
+    )
+    mock_top_companies = [("AAPL", 1000000), ("GOOGL", 900000), ("MSFT", 800000)]
+
+    def mock_get_top_companies(*args, **kwargs):
+        return mock_top_companies
+
+    def mock_optimise_pairs(*args, **kwargs):
+        return (
+            ("AAPL", "GOOGL"),
+            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+            {"Sharpe Ratio": 1.5, "Total Return": 0.2, "Max Drawdown": -0.1},
+        )
+
+    def mock_load_data(*args, **kwargs):
+        return mock_polars_data
+
+    def mock_run_optimisation(
+        data,
+        strategy_type,
+        received_params,
+        start_date,
+        end_date,
+        tickers,
+        walk_forward=False,
+    ):
+        assert received_params == strategy_params
+        assert walk_forward is True
+        return (
+            {"window": 25, "entry_z_score": 2.5, "exit_z_score": 0.7},
+            {"Sharpe Ratio": 1.8, "Total Return": 0.3, "Max Drawdown": -0.1},
+        )
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_top_sp500_companies",
+        mock_get_top_companies,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.optimise_pairs_trading_tickers",
+        mock_optimise_pairs,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_two_tickers",
+        mock_load_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.run_optimisation",
+        mock_run_optimisation,
+    )
+
+    start_date = datetime.date(2020, 1, 1)
+    end_date = datetime.date(2020, 12, 31)
+    strategy_params = {
+        "window": range(10, 31),
+        "entry_z_score": [1.5, 2.0, 2.5],
+        "exit_z_score": [0.3, 0.5, 0.7],
+    }
+
+    _, ticker_display, optimised_params = (
+        prepare_pairs_trading_strategy_with_optimisation(
+            start_date, end_date, strategy_params, True, walk_forward=True
+        )
+    )
+
+    assert ticker_display == "AAPL vs. GOOGL"
+    assert optimised_params == {
+        "window": 25,
+        "entry_z_score": 2.5,
+        "exit_z_score": 0.7,
+    }
 
 
 def test_run_optimisation(monkeypatch):
