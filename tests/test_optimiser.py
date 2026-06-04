@@ -305,7 +305,11 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
             "Close_2": [200.0 + i for i in range(10)],
         }
     )
-    strategy_params = {"window": [20, 30], "entry_z_score": [2.0], "exit_z_score": [0.5]}
+    strategy_params = {
+        "window": [20, 30],
+        "entry_z_score": [2.0],
+        "exit_z_score": [0.5],
+    }
     train_scores = {
         ("AAPL", "GOOGL"): 1.0,
         ("AAPL", "MSFT"): 2.0,
