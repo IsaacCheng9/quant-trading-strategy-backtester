@@ -18,9 +18,13 @@ def test_load_yfinance_data_one_ticker(
     monkeypatch, mock_yfinance_data: pd.DataFrame
 ) -> None:
     def mock_download(*args, **kwargs):
-        return mock_yfinance_data.set_index("Date")
+        assert kwargs["auto_adjust"] is True
+        data = mock_yfinance_data.copy()
+        data["Close"] = data["Adj Close"]
+        return data.drop(columns=["Adj Close"]).set_index("Date")
 
     monkeypatch.setattr("yfinance.download", mock_download)
+    load_yfinance_data_one_ticker.clear()
 
     data = load_yfinance_data_one_ticker(
         "AAPL", datetime.date(2020, 1, 1), datetime.date(2020, 1, 31)
@@ -29,6 +33,7 @@ def test_load_yfinance_data_one_ticker(
     assert not data.is_empty()
     assert "Date" in data.columns
     assert "Close" in data.columns
+    assert "Adj Close" not in data.columns
     assert len(data) == 31
 
 
@@ -36,6 +41,7 @@ def test_load_yfinance_data_two_tickers(
     monkeypatch, mock_yfinance_data: pd.DataFrame
 ) -> None:
     def mock_download(*args, **kwargs):
+        assert kwargs["auto_adjust"] is True
         # yfinance returns MultiIndex columns when downloading multiple
         # tickers.
         base_data = mock_yfinance_data.set_index("Date")
@@ -55,6 +61,7 @@ def test_load_yfinance_data_two_tickers(
         return multi_index_data
 
     monkeypatch.setattr("yfinance.download", mock_download)
+    load_yfinance_data_two_tickers.clear()
 
     data = load_yfinance_data_two_tickers(
         "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 31)

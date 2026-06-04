@@ -21,7 +21,7 @@ def load_yfinance_data_one_ticker(
     ticker: str, start_date: datetime.date, end_date: datetime.date
 ) -> pl.DataFrame:
     """
-    Fetches historical stock data for a ticker from Yahoo Finance.
+    Fetches adjusted historical stock data for a ticker from Yahoo Finance.
 
     Args:
         ticker: The stock ticker symbol.
@@ -29,9 +29,9 @@ def load_yfinance_data_one_ticker(
         end_date: The end date for the data.
 
     Returns:
-        A Polars DataFrame containing the historical stock data.
+        A Polars DataFrame containing adjusted historical stock data.
     """
-    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=False)
+    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True)
     data = cast(pd.DataFrame, data)
     # Handle MultiIndex columns by taking just the first level
     if isinstance(data.columns, pd.MultiIndex):
@@ -47,7 +47,7 @@ def load_yfinance_data_two_tickers(
     ticker1: str, ticker2: str, start_date: datetime.date, end_date: datetime.date
 ) -> pl.DataFrame:
     """
-    Fetches historical stock data for two tickers from Yahoo Finance.
+    Fetches adjusted historical stock data for two tickers from Yahoo Finance.
 
     Args:
         ticker1: The first stock ticker symbol.
@@ -56,15 +56,15 @@ def load_yfinance_data_two_tickers(
         end_date: The end date for the data.
 
     Returns:
-        A Polars DataFrame containing the historical stock data for both tickers.
+        A Polars DataFrame containing adjusted historical stock data for both tickers.
     """
     # Download both tickers in one call for better performance.
     data = yf.download(
-        [ticker1, ticker2], start=start_date, end=end_date, auto_adjust=False
+        [ticker1, ticker2], start=start_date, end=end_date, auto_adjust=True
     )
     data = cast(pd.DataFrame, data)
 
-    # Extract Close prices for both tickers.
+    # Extract adjusted Close prices for both tickers.
     # When downloading multiple tickers, yfinance returns MultiIndex columns.
     if isinstance(data.columns, pd.MultiIndex):
         # Get Close prices for each ticker.

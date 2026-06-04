@@ -29,7 +29,8 @@ _Try the deployed app
   pairs spread z-score charts with entry/exit threshold bands
 - **Performance metrics** – Total Return, Sharpe Ratio, Max Drawdown, and
   monthly performance table with rolling returns
-- **Real-time data fetching** – historical market data from Yahoo Finance
+- **Real-time data fetching** – adjusted historical market data from Yahoo
+  Finance
 
 ## Screenshots
 
