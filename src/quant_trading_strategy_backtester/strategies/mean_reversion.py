@@ -61,6 +61,11 @@ class MeanReversionStrategy(BaseStrategy):
                 ]
             )
 
+        valid_band = (
+            pl.col("std").is_not_null()
+            & pl.col("std").is_finite()
+            & (pl.col("std") > 0)
+        )
         signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
             data.select([pl.col("Date"), pl.col("Close")])
             .lazy()
@@ -80,15 +85,6 @@ class MeanReversionStrategy(BaseStrategy):
                     .alias("std"),
                 ]
             )
-            # Avoid division by zero by replacing 0s with NaN.
-            .with_columns(
-                [
-                    pl.when(pl.col("std") == 0)
-                    .then(pl.lit(float("nan")))
-                    .otherwise(pl.col("std"))
-                    .alias("std")
-                ]
-            )
             .with_columns(
                 [
                     (pl.col("mean") + (self.std_dev * pl.col("std"))).alias(
@@ -101,11 +97,11 @@ class MeanReversionStrategy(BaseStrategy):
             )
             .with_columns(
                 [
-                    # Buy signal
-                    pl.when(pl.col("Close") < pl.col("lower_band"))
+                    # Buy signal.
+                    pl.when(valid_band & (pl.col("Close") < pl.col("lower_band")))
                     .then(1.0)
-                    # Sell signal
-                    .when(pl.col("Close") > pl.col("upper_band"))
+                    # Sell signal.
+                    .when(valid_band & (pl.col("Close") > pl.col("upper_band")))
                     .then(-1.0)
                     .otherwise(0.0)
                     .alias("signal")
