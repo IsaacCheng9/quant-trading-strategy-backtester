@@ -8,6 +8,10 @@ import polars as pl
 from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
 
 
+def assert_single_entry_trade(signals: pl.DataFrame) -> None:
+    assert signals["position_change"].to_list() == [1.0] + [0.0] * (len(signals) - 1)
+
+
 def test_buy_and_hold_strategy_initialisation() -> None:
     params = {}  # Buy and Hold doesn't require parameters
     strategy = BuyAndHoldStrategy(params)
@@ -22,7 +26,7 @@ def test_buy_and_hold_strategy_generate_signals(mock_polars_data: pl.DataFrame) 
     EXPECTED_COLS = {"Date", "Close", "signal", "position_change"}
     assert all(col in signals.columns for col in EXPECTED_COLS)
     assert (signals["signal"] == 1).all(), "All signals should be 1 (buy)"
-    assert (signals["position_change"] == 1).all(), "All position_change should be 1"
+    assert_single_entry_trade(signals)
 
 
 def test_buy_and_hold_strategy_with_mock_data():
@@ -41,7 +45,7 @@ def test_buy_and_hold_strategy_with_mock_data():
 
     # Check if signals are generated correctly
     assert signals["signal"].sum() == len(signals), "All signals should be buy (1)"
-    assert (signals["position_change"] == 1).all(), "All position_change should be 1"
+    assert_single_entry_trade(signals)
 
     # Check if the strategy maintains the buy position throughout
     assert (signals["signal"] == 1).all(), "Buy signal should be maintained throughout"
@@ -81,4 +85,4 @@ def test_buy_and_hold_strategy_with_various_price_movements():
 
     # Check if the strategy maintains the buy position regardless of price movements
     assert (signals["signal"] == 1).all(), "Buy signal should be maintained throughout"
-    assert (signals["position_change"] == 1).all(), "All position_change should be 1"
+    assert_single_entry_trade(signals)

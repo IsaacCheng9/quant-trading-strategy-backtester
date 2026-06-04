@@ -21,9 +21,10 @@ class BuyAndHoldStrategy(BaseStrategy):
         super().__init__(params)
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Generates trading signals for the Buy and Hold strategy. Creates a
-        column of 1s to indicate a constant long position.
+        """Generate trading signals for the Buy and Hold strategy.
+
+        Create a constant long position with a single position change on the
+        first row, so costs are charged once when the strategy enters.
 
         Args:
             data: Historical price data.
@@ -43,13 +44,18 @@ class BuyAndHoldStrategy(BaseStrategy):
 
         signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
             data.select([pl.col("Date"), pl.col("Close")])
+            .with_row_index()
             .lazy()
             .with_columns(
                 [
                     pl.lit(1.0).alias("signal"),
-                    pl.lit(1.0).alias("position_change"),
+                    pl.when(pl.col("index") == 0)
+                    .then(1.0)
+                    .otherwise(0.0)
+                    .alias("position_change"),
                 ]
             )
+            .drop("index")
             .collect()
         )
 

@@ -11,6 +11,7 @@ import pytest
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.models import StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
 from quant_trading_strategy_backtester.strategies.mean_reversion import (
     MeanReversionStrategy,
 )
@@ -376,3 +377,48 @@ def test_default_transaction_costs_reduce_returns():
     assert default_cum < zero_cum, (
         "Default costs should produce lower returns than zero costs"
     )
+
+
+def test_buy_and_hold_charges_initial_entry_cost_only():
+    """
+    Verify that buy and hold pays costs on entry rather than on every row.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+            ],
+            "Close": [100.0, 110.0, 121.0],
+        }
+    )
+    strategy = BuyAndHoldStrategy({})
+
+    bt_no_costs = Backtester(
+        data,
+        strategy,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+    results_no_costs = bt_no_costs.run()
+
+    bt_with_costs = Backtester(
+        data,
+        strategy,
+        transaction_cost_bps=5.0,
+        slippage_bps=3.0,
+    )
+    results_with_costs = bt_with_costs.run()
+
+    cost_per_trade = 8.0 / 10_000
+    return_diffs = [
+        no_cost - with_cost
+        for no_cost, with_cost in zip(
+            results_no_costs["strategy_returns"],
+            results_with_costs["strategy_returns"],
+        )
+    ]
+
+    assert return_diffs == [cost_per_trade, 0.0, 0.0]
+    assert results_with_costs["position_change"].to_list() == [1.0, 0.0, 0.0]
