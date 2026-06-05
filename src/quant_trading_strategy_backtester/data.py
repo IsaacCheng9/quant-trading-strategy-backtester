@@ -58,20 +58,31 @@ def load_yfinance_data_two_tickers(
     Returns:
         A Polars DataFrame containing adjusted historical stock data for both tickers.
     """
+    ticker1 = ticker1.strip().upper()
+    ticker2 = ticker2.strip().upper()
+    if ticker1 == ticker2:
+        raise ValueError("Ticker symbols must be different")
+
     # Download both tickers in one call for better performance.
     data = yf.download(
         [ticker1, ticker2], start=start_date, end=end_date, auto_adjust=True
     )
     data = cast(pd.DataFrame, data)
+    if data.empty:
+        return _empty_two_ticker_data()
 
-    # Extract adjusted Close prices for both tickers.
-    # When downloading multiple tickers, yfinance returns MultiIndex columns.
-    if isinstance(data.columns, pd.MultiIndex):
-        # Get Close prices for each ticker.
-        close_data = data["Close"]
-        close_data = close_data.reset_index()
-        # Rename columns to match expected format.
-        close_data.columns = ["Date", "Close_1", "Close_2"]
+    if not isinstance(data.columns, pd.MultiIndex):
+        raise ValueError("Expected MultiIndex columns for two-ticker yfinance data")
+
+    close_1 = _select_close_series(data, ticker1)
+    close_2 = _select_close_series(data, ticker2)
+    close_data = pd.DataFrame(
+        {
+            "Date": data.index,
+            "Close_1": close_1.to_numpy(),
+            "Close_2": close_2.to_numpy(),
+        }
+    )
 
     # Convert to Polars.
     combined_data = pl.from_pandas(close_data)
@@ -79,6 +90,44 @@ def load_yfinance_data_two_tickers(
     combined_data = combined_data.drop_nulls()
 
     return combined_data
+
+
+def _select_close_series(data: pd.DataFrame, ticker: str) -> pd.Series:
+    """
+    Select a ticker's close series from either yfinance MultiIndex layout.
+
+    Args:
+        data: The yfinance response for multiple tickers.
+        ticker: The ticker whose close prices should be selected.
+
+    Returns:
+        The ticker's close-price series.
+
+    Raises:
+        ValueError: If the response does not contain exactly one close column.
+    """
+    matches = [
+        column
+        for column in data.columns
+        if isinstance(column, tuple) and "Close" in column and ticker in column
+    ]
+    if len(matches) != 1:
+        raise ValueError(
+            f"Expected exactly one Close column for {ticker}, found {len(matches)}"
+        )
+
+    return data[matches[0]]
+
+
+def _empty_two_ticker_data() -> pl.DataFrame:
+    """Return the empty schema expected by pairs-trading callers."""
+    return pl.DataFrame(
+        schema={
+            "Date": pl.Datetime,
+            "Close_1": pl.Float64,
+            "Close_2": pl.Float64,
+        }
+    )
 
 
 @st.cache_data

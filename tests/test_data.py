@@ -6,6 +6,7 @@ import datetime
 
 import pandas as pd
 import polars as pl
+import pytest
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     is_same_company,
@@ -72,6 +73,100 @@ def test_load_yfinance_data_two_tickers(
     assert "Close_1" in data.columns
     assert "Close_2" in data.columns
     assert len(data) == 31
+
+
+def test_load_yfinance_data_two_tickers_preserves_requested_order(
+    monkeypatch,
+) -> None:
+    dates = pd.date_range(start="1/1/2020", end="1/3/2020")
+
+    def mock_download(*args, **kwargs):
+        assert args[0] == ["AAPL", "MSFT"]
+        columns = pd.MultiIndex.from_tuples(
+            [("Close", "MSFT"), ("Close", "AAPL")]
+        )
+        return pd.DataFrame(
+            [[200.0, 100.0], [201.0, 101.0], [202.0, 102.0]],
+            index=dates,
+            columns=columns,
+        )
+
+    monkeypatch.setattr("yfinance.download", mock_download)
+    load_yfinance_data_two_tickers.clear()
+
+    data = load_yfinance_data_two_tickers(
+        "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 3)
+    )
+
+    assert data["Close_1"].to_list() == [100.0, 101.0, 102.0]
+    assert data["Close_2"].to_list() == [200.0, 201.0, 202.0]
+
+
+def test_load_yfinance_data_two_tickers_handles_ticker_first_columns(
+    monkeypatch,
+) -> None:
+    dates = pd.date_range(start="1/1/2020", end="1/3/2020")
+
+    def mock_download(*args, **kwargs):
+        columns = pd.MultiIndex.from_tuples(
+            [("AAPL", "Close"), ("MSFT", "Close")]
+        )
+        return pd.DataFrame(
+            [[100.0, 200.0], [101.0, 201.0], [102.0, 202.0]],
+            index=dates,
+            columns=columns,
+        )
+
+    monkeypatch.setattr("yfinance.download", mock_download)
+    load_yfinance_data_two_tickers.clear()
+
+    data = load_yfinance_data_two_tickers(
+        "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 3)
+    )
+
+    assert data["Close_1"].to_list() == [100.0, 101.0, 102.0]
+    assert data["Close_2"].to_list() == [200.0, 201.0, 202.0]
+
+
+def test_load_yfinance_data_two_tickers_rejects_flat_response(
+    monkeypatch,
+) -> None:
+    dates = pd.date_range(start="1/1/2020", end="1/3/2020")
+
+    def mock_download(*args, **kwargs):
+        return pd.DataFrame({"Close": [100.0, 101.0, 102.0]}, index=dates)
+
+    monkeypatch.setattr("yfinance.download", mock_download)
+    load_yfinance_data_two_tickers.clear()
+
+    with pytest.raises(ValueError, match="Expected MultiIndex columns"):
+        load_yfinance_data_two_tickers(
+            "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 3)
+        )
+
+
+def test_load_yfinance_data_two_tickers_requires_both_close_columns(
+    monkeypatch,
+) -> None:
+    dates = pd.date_range(start="1/1/2020", end="1/3/2020")
+
+    def mock_download(*args, **kwargs):
+        columns = pd.MultiIndex.from_tuples(
+            [("Close", "AAPL"), ("Open", "MSFT")]
+        )
+        return pd.DataFrame(
+            [[100.0, 200.0], [101.0, 201.0], [102.0, 202.0]],
+            index=dates,
+            columns=columns,
+        )
+
+    monkeypatch.setattr("yfinance.download", mock_download)
+    load_yfinance_data_two_tickers.clear()
+
+    with pytest.raises(ValueError, match="Expected exactly one Close column for MSFT"):
+        load_yfinance_data_two_tickers(
+            "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 3)
+        )
 
 
 def test_get_full_company_name_success(monkeypatch):
