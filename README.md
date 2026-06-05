@@ -34,6 +34,9 @@ _Try the deployed app
 
 ## Methodology Notes
 
+- **Pairs trading** uses a rolling hedge ratio to build the spread and
+  exposure-normalised leg weights to calculate pair returns and transaction
+  costs
 - **Ticker/pair selection** uses a 70/30 train/test split – tickers are
   selected on training data and evaluated on held-out test data to reduce
   look-ahead bias

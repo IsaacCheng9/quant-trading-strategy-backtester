@@ -24,6 +24,44 @@ from quant_trading_strategy_backtester.strategies.pairs_trading import (
 from conftest import MockHoldingStrategy
 
 
+class MockPairsWeightedStrategy(BaseStrategy):
+    """A mock pairs strategy with predetermined leg weights."""
+
+    def __init__(self, params: dict[str, Any]):
+        super().__init__(params)
+        self.signals = params["signals"]
+        self.leg_1_weights = params["leg_1_weights"]
+        self.leg_2_weights = params["leg_2_weights"]
+
+    def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
+        """Return predetermined pair signals and leg weights."""
+        leg_1_weight_changes = _calculate_changes(self.leg_1_weights)
+        leg_2_weight_changes = _calculate_changes(self.leg_2_weights)
+
+        return data.select(
+            [pl.col("Date"), pl.col("Close_1"), pl.col("Close_2")]
+        ).with_columns(
+            [
+                pl.Series("signal", self.signals),
+                pl.Series("leg_1_weight", self.leg_1_weights),
+                pl.Series("leg_2_weight", self.leg_2_weights),
+                pl.Series("leg_1_weight_change", leg_1_weight_changes),
+                pl.Series("leg_2_weight_change", leg_2_weight_changes),
+                pl.Series("signal", self.signals)
+                .diff()
+                .fill_null(0)
+                .alias("position_change"),
+            ]
+        )
+
+
+def _calculate_changes(values: list[float]) -> list[float]:
+    """Return first differences while treating the first value as an entry."""
+    return [values[0]] + [
+        current - previous for previous, current in zip(values, values[1:])
+    ]
+
+
 @pytest.mark.parametrize(
     "strategy_class,params,data_fixture",
     [
@@ -422,3 +460,67 @@ def test_buy_and_hold_charges_initial_entry_cost_only():
 
     assert return_diffs == [cost_per_trade, 0.0, 0.0]
     assert results_with_costs["position_change"].to_list() == [1.0, 0.0, 0.0]
+
+
+def test_pairs_returns_use_normalised_leg_weights():
+    """
+    Verify that pairs returns use the previous day's normalised leg weights.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+            ],
+            "Close_1": [100.0, 110.0, 121.0],
+            "Close_2": [100.0, 100.0, 100.0],
+        }
+    )
+    strategy = MockPairsWeightedStrategy(
+        {
+            "signals": [0.0, 1.0, 1.0],
+            "leg_1_weights": [0.0, 1 / 3, 1 / 3],
+            "leg_2_weights": [0.0, -2 / 3, -2 / 3],
+        }
+    )
+
+    backtester = Backtester(data, strategy, transaction_cost_bps=0.0, slippage_bps=0.0)
+    results = backtester.run()
+
+    assert results["strategy_returns"].to_list() == pytest.approx([0.0, 0.0, 0.1 / 3])
+
+
+def test_pairs_costs_use_leg_weight_changes():
+    """
+    Verify that pairs costs are charged on leg turnover, not signal changes.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+                datetime.date(2020, 1, 4),
+            ],
+            "Close_1": [100.0, 100.0, 100.0, 100.0],
+            "Close_2": [100.0, 100.0, 100.0, 100.0],
+        }
+    )
+    strategy = MockPairsWeightedStrategy(
+        {
+            "signals": [0.0, 1.0, 1.0, 1.0],
+            "leg_1_weights": [0.0, 0.5, 1 / 3, 1 / 3],
+            "leg_2_weights": [0.0, -0.5, -2 / 3, -2 / 3],
+        }
+    )
+
+    backtester = Backtester(data, strategy, transaction_cost_bps=10.0, slippage_bps=5.0)
+    results = backtester.run()
+
+    cost_rate = 15.0 / 10_000
+    assert results["pair_turnover"].to_list() == pytest.approx([0.0, 1.0, 1 / 3, 0.0])
+    assert results["strategy_returns"].to_list() == pytest.approx(
+        [0.0, -cost_rate, -(cost_rate / 3), 0.0]
+    )
+    assert results["position_change"].to_list() == [0.0, 1.0, 0.0, 0.0]
