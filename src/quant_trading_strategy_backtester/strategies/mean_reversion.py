@@ -7,6 +7,9 @@ from typing import Any
 
 import polars as pl
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+from quant_trading_strategy_backtester.strategy_params import (
+    validate_strategy_params,
+)
 
 
 class MeanReversionStrategy(BaseStrategy):
@@ -23,6 +26,7 @@ class MeanReversionStrategy(BaseStrategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        validate_strategy_params("Mean Reversion", params)
         super().__init__(params)
         # The number of days to calculate the moving average and standard
         # deviation.

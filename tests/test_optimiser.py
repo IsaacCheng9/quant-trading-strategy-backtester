@@ -940,6 +940,59 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
     assert metrics["Total Return"] == 0.05
 
 
+def test_optimise_strategy_params_skips_invalid_parameter_combinations(
+    monkeypatch,
+) -> None:
+    """Verify optimisation does not run backtests for invalid grid values."""
+    data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
+            "Close": [100 + i for i in range(21)],
+        }
+    )
+    evaluated_params = []
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        evaluated_params.append(params)
+        return None, {
+            "Sharpe Ratio": 1.0,
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    params, _ = optimise_strategy_params(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [10, 30], "long_window": [20]},
+        "AAPL",
+    )
+
+    assert evaluated_params == [{"short_window": 10, "long_window": 20}]
+    assert params == {"short_window": 10, "long_window": 20}
+
+
+def test_optimise_strategy_params_raises_when_all_combinations_are_invalid() -> None:
+    """Verify optimisation reports invalid grids before running backtests."""
+    data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
+            "Close": [100 + i for i in range(21)],
+        }
+    )
+
+    with pytest.raises(ValueError, match="No valid parameter combinations"):
+        optimise_strategy_params(
+            data,
+            "Pairs Trading",
+            {"window": [20], "entry_z_score": [1.0], "exit_z_score": [1.0]},
+            ["AAPL", "MSFT"],
+        )
+
+
 def test_optimise_buy_and_hold_ticker_uses_train_test_split(monkeypatch):
     """Verify buy-and-hold ticker selection uses train for ranking, test for eval."""
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0)]

@@ -7,6 +7,9 @@ from typing import Any
 
 import polars as pl
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+from quant_trading_strategy_backtester.strategy_params import (
+    validate_strategy_params,
+)
 
 
 class MovingAverageCrossoverStrategy(BaseStrategy):
@@ -22,6 +25,7 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        validate_strategy_params("Moving Average Crossover", params)
         super().__init__(params)
         # The number of days for the short-term and long-term moving average.
         self.short_window = int(params["short_window"])

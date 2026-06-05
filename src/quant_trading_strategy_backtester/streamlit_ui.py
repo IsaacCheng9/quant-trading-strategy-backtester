@@ -126,8 +126,12 @@ def get_fixed_params(strategy_type: str) -> dict[str, Any]:
             short_window = st.sidebar.slider(
                 "Short Window (Days)", min_value=5, max_value=50, value=20
             )
+            long_window_min = max(20, short_window + 1)
             long_window = st.sidebar.slider(
-                "Long Window (Days)", min_value=20, max_value=200, value=50
+                "Long Window (Days)",
+                min_value=long_window_min,
+                max_value=200,
+                value=max(50, long_window_min),
             )
             return {"short_window": short_window, "long_window": long_window}
         case "Mean Reversion":
@@ -145,8 +149,13 @@ def get_fixed_params(strategy_type: str) -> dict[str, Any]:
             entry_z_score = st.sidebar.slider(
                 "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
             )
+            exit_z_score_max = min(1.5, round(entry_z_score - 0.1, 1))
             exit_z_score = st.sidebar.slider(
-                "Exit Z-Score", min_value=0.1, max_value=1.5, value=0.5, step=0.1
+                "Exit Z-Score",
+                min_value=0.1,
+                max_value=exit_z_score_max,
+                value=min(0.5, exit_z_score_max),
+                step=0.1,
             )
             return {
                 "window": window,

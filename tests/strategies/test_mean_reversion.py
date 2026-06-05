@@ -5,6 +5,7 @@ Tests for the Mean Reversion strategy class.
 from datetime import date, timedelta
 
 import polars as pl
+import pytest
 from quant_trading_strategy_backtester.strategies.mean_reversion import (
     MeanReversionStrategy,
 )
@@ -15,6 +16,20 @@ def test_mean_reversion_strategy_initialisation() -> None:
     strategy = MeanReversionStrategy(params)
     assert strategy.window == 20
     assert strategy.std_dev == 2.0
+
+
+@pytest.mark.parametrize(
+    ("params", "error"),
+    [
+        ({"window": 0, "std_dev": 2.0}, "window must be positive"),
+        ({"window": 20, "std_dev": 0.0}, "std_dev must be positive"),
+    ],
+)
+def test_mean_reversion_rejects_invalid_parameters(
+    params: dict[str, float], error: str
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        MeanReversionStrategy(params)
 
 
 def test_mean_reversion_strategy_generate_signals(

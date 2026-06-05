@@ -32,6 +32,9 @@ from quant_trading_strategy_backtester.strategies.moving_average_crossover impor
 from quant_trading_strategy_backtester.strategies.pairs_trading import (
     PairsTradingStrategy,
 )
+from quant_trading_strategy_backtester.strategy_params import (
+    is_valid_strategy_params,
+)
 from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
 
 TRAIN_RATIO = 0.7
@@ -327,25 +330,23 @@ def optimise_strategy_params(
     best_metrics = None
     best_sharpe_ratio = float("-inf")
 
-    param_names = list(parameter_ranges.keys())
-    param_values = [
-        list(value) if isinstance(value, range) else value
-        for value in parameter_ranges.values()
-    ]
-
-    param_combinations = list(itertools.product(*param_values))
+    param_combinations = _valid_parameter_combinations(
+        strategy_type, parameter_ranges
+    )
     total_combinations = len(param_combinations)
+    if total_combinations == 0:
+        raise ValueError(f"No valid parameter combinations for {strategy_type}")
+
     # Display progress bar and status text, as this process may take a while.
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    for i, params in enumerate(param_combinations):
+    for i, current_params in enumerate(param_combinations):
         status_text.text(
             f"Evaluating parameter combination {i + 1} / {total_combinations}"
         )
         progress_bar.progress((i + 1) / total_combinations)
 
-        current_params = dict(zip(param_names, params))
         _, metrics = run_backtest(data, strategy_type, current_params, tickers)
 
         if metrics["Sharpe Ratio"] > best_sharpe_ratio:
@@ -500,11 +501,11 @@ def walk_forward_optimise(
             f"{n_rows} rows, need at least {2 * (n_folds + 1)}"
         )
 
-    param_names = list(parameter_ranges.keys())
-    param_values = [
-        list(v) if isinstance(v, range) else v for v in parameter_ranges.values()
-    ]
-    param_combinations = list(itertools.product(*param_values))
+    param_combinations = _valid_parameter_combinations(
+        strategy_type, parameter_ranges
+    )
+    if not param_combinations:
+        raise ValueError(f"No valid parameter combinations for {strategy_type}")
 
     fold_results: list[dict] = []
 
@@ -517,8 +518,7 @@ def walk_forward_optimise(
         # Grid search on training data.
         best_sharpe = float("-inf")
         best_params: dict[str, int | float] | None = None
-        for params in param_combinations:
-            current_params = dict(zip(param_names, params))
+        for current_params in param_combinations:
             _, metrics = run_backtest(
                 train_data, strategy_type, current_params, tickers
             )
@@ -554,6 +554,35 @@ def walk_forward_optimise(
     final_params = fold_results[-1]["params"]
 
     return final_params, aggregated_metrics, fold_results
+
+
+def _valid_parameter_combinations(
+    strategy_type: str,
+    parameter_ranges: dict[str, range | list[int | float]],
+) -> list[dict[str, int | float]]:
+    """
+    Return scalar parameter combinations that pass strategy validation.
+
+    Args:
+        strategy_type: The strategy being optimised.
+        parameter_ranges: Candidate values for each parameter.
+
+    Returns:
+        Valid scalar parameter dictionaries for grid search.
+    """
+    param_names = list(parameter_ranges.keys())
+    param_values = [
+        list(value) if isinstance(value, range) else value
+        for value in parameter_ranges.values()
+    ]
+
+    return [
+        current_params
+        for params in itertools.product(*param_values)
+        if is_valid_strategy_params(
+            strategy_type, current_params := dict(zip(param_names, params))
+        )
+    ]
 
 
 def run_backtest(

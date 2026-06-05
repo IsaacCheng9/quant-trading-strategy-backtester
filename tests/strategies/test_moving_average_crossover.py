@@ -5,6 +5,7 @@ Tests for the Moving Average Crossover strategy class.
 from datetime import date, timedelta
 
 import polars as pl
+import pytest
 from quant_trading_strategy_backtester.strategies.moving_average_crossover import (
     MovingAverageCrossoverStrategy,
 )
@@ -15,6 +16,13 @@ def test_moving_average_crossover_strategy_initialisation() -> None:
     strategy = MovingAverageCrossoverStrategy(params)
     assert strategy.short_window == 5
     assert strategy.long_window == 20
+
+
+def test_moving_average_crossover_rejects_invalid_windows() -> None:
+    params = {"short_window": 20, "long_window": 20}
+
+    with pytest.raises(ValueError, match="short_window must be less"):
+        MovingAverageCrossoverStrategy(params)
 
 
 def test_moving_average_crossover_strategy_generate_signals(

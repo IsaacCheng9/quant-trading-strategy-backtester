@@ -8,6 +8,9 @@ from typing import Any
 
 import polars as pl
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+from quant_trading_strategy_backtester.strategy_params import (
+    validate_strategy_params,
+)
 
 
 class PairsTradingStrategy(BaseStrategy):
@@ -24,6 +27,7 @@ class PairsTradingStrategy(BaseStrategy):
     """
 
     def __init__(self, params: dict[str, Any]):
+        validate_strategy_params("Pairs Trading", params)
         super().__init__(params)
         # The lookback period for calculating the rolling mean and standard
         # deviation of the spread.

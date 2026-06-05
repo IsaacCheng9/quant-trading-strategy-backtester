@@ -46,6 +46,13 @@ def test_pairs_trading_strategy_initialisation() -> None:
     assert strategy.exit_z_score == 0.5
 
 
+def test_pairs_trading_strategy_rejects_invalid_thresholds() -> None:
+    params = {"window": 20, "entry_z_score": 1.0, "exit_z_score": 1.0}
+
+    with pytest.raises(ValueError, match="exit_z_score must be less"):
+        PairsTradingStrategy(params)
+
+
 def test_pairs_trading_strategy_signal_generation() -> None:
     start_date = date(2020, 1, 1)
     end_date = date(2020, 4, 9)
