@@ -2,11 +2,21 @@
 Contains functions to display backtest results using Streamlit and Plotly.
 """
 
+import math
+
 import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
 from quant_trading_strategy_backtester.backtester import build_trade_ledger
+
+
+def _format_metric(value: float, format_spec: str) -> str:
+    """Format finite metrics and display undefined metrics clearly."""
+    if not math.isfinite(value):
+        return "N/A"
+
+    return f"{value:{format_spec}}"
 
 
 def display_performance_metrics(
@@ -21,9 +31,15 @@ def display_performance_metrics(
     """
     st.header(f"Backtest Results for {company_name}")
     total_return_col, sharpe_ratio_col, max_drawdown_col = st.columns(3)
-    total_return_col.metric("Total Return", f"{metrics['Total Return']:.4%}")
-    sharpe_ratio_col.metric("Sharpe Ratio", f"{metrics['Sharpe Ratio']:.4f}")
-    max_drawdown_col.metric("Max Drawdown", f"{metrics['Max Drawdown']:.4%}")
+    total_return_col.metric(
+        "Total Return", _format_metric(metrics["Total Return"], ".4%")
+    )
+    sharpe_ratio_col.metric(
+        "Sharpe Ratio", _format_metric(metrics["Sharpe Ratio"], ".4f")
+    )
+    max_drawdown_col.metric(
+        "Max Drawdown", _format_metric(metrics["Max Drawdown"], ".4%")
+    )
 
     if {
         "Gross Total Return",
@@ -34,14 +50,21 @@ def display_performance_metrics(
     }.issubset(metrics):
         gross_return_col, cost_drag_col, total_costs_col = st.columns(3)
         gross_return_col.metric(
-            "Gross Total Return", f"{metrics['Gross Total Return']:.4%}"
+            "Gross Total Return",
+            _format_metric(metrics["Gross Total Return"], ".4%"),
         )
-        cost_drag_col.metric("Cost Drag", f"{metrics['Cost Drag']:.4%}")
-        total_costs_col.metric("Total Costs", f"{metrics['Total Costs']:.4%}")
+        cost_drag_col.metric("Cost Drag", _format_metric(metrics["Cost Drag"], ".4%"))
+        total_costs_col.metric(
+            "Total Costs", _format_metric(metrics["Total Costs"], ".4%")
+        )
 
         trade_events_col, turnover_col, _ = st.columns(3)
-        trade_events_col.metric("Trade Events", f"{metrics['Trade Events']:.0f}")
-        turnover_col.metric("Total Turnover", f"{metrics['Total Turnover']:.4f}")
+        trade_events_col.metric(
+            "Trade Events", _format_metric(metrics["Trade Events"], ".0f")
+        )
+        turnover_col.metric(
+            "Total Turnover", _format_metric(metrics["Total Turnover"], ".4f")
+        )
 
 
 def plot_equity_curve(

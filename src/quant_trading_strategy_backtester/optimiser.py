@@ -5,6 +5,7 @@ parameters and ticker pairs.
 
 import datetime
 import itertools
+import math
 import time
 from typing import Any, cast
 
@@ -84,6 +85,17 @@ def get_validation_data(
 
     _, test_data = _split_data(data)
     return test_data
+
+
+def _optimisation_score(
+    metrics: dict[str, float], metric_name: str = "Sharpe Ratio"
+) -> float | None:
+    """Return a finite optimisation score, or None for invalid metrics."""
+    score = metrics.get(metric_name)
+    if score is None or not math.isfinite(score):
+        return None
+
+    return score
 
 
 def run_optimisation(
@@ -219,8 +231,12 @@ def optimise_buy_and_hold_ticker(
         backtester.run()
         train_metrics = backtester.get_performance_metrics()
 
-        if train_metrics and train_metrics["Total Return"] > best_total_return:
-            best_total_return = train_metrics["Total Return"]
+        if train_metrics is None:
+            continue
+
+        total_return = _optimisation_score(train_metrics, "Total Return")
+        if total_return is not None and total_return > best_total_return:
+            best_total_return = total_return
             best_ticker = ticker
             best_test_data = test_data
 
@@ -287,8 +303,9 @@ def optimise_single_ticker_strategy_ticker(
         train_data, _ = _split_data(data)
         _, train_metrics = run_backtest(train_data, strategy_type, fixed_params, ticker)
 
-        if train_metrics["Sharpe Ratio"] > best_sharpe_ratio:
-            best_sharpe_ratio = train_metrics["Sharpe Ratio"]
+        score = _optimisation_score(train_metrics)
+        if score is not None and score > best_sharpe_ratio:
+            best_sharpe_ratio = score
             best_ticker = ticker
 
     progress_bar.empty()
@@ -347,8 +364,9 @@ def optimise_strategy_params(
 
         _, metrics = run_backtest(data, strategy_type, current_params, tickers)
 
-        if metrics["Sharpe Ratio"] > best_sharpe_ratio:
-            best_sharpe_ratio = metrics["Sharpe Ratio"]
+        score = _optimisation_score(metrics)
+        if score is not None and score > best_sharpe_ratio:
+            best_sharpe_ratio = score
             best_params = current_params
             best_metrics = metrics
 
@@ -441,8 +459,9 @@ def optimise_pairs_trading_tickers(
             )
             current_params = strategy_params
 
-        if train_metrics["Sharpe Ratio"] > best_sharpe_ratio:
-            best_sharpe_ratio = train_metrics["Sharpe Ratio"]
+        score = _optimisation_score(train_metrics)
+        if score is not None and score > best_sharpe_ratio:
+            best_sharpe_ratio = score
             best_pair = (ticker1, ticker2)
             best_params = current_params
             best_test_data = test_data
@@ -518,8 +537,9 @@ def walk_forward_optimise(
             _, metrics = run_backtest(
                 train_data, strategy_type, current_params, tickers
             )
-            if metrics["Sharpe Ratio"] > best_sharpe:
-                best_sharpe = metrics["Sharpe Ratio"]
+            score = _optimisation_score(metrics)
+            if score is not None and score > best_sharpe:
+                best_sharpe = score
                 best_params = current_params
 
         if best_params is None:

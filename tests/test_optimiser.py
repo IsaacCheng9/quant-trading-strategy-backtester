@@ -3,12 +3,14 @@ Contains tests for optimisation functions.
 """
 
 import datetime
+import math
 from typing import Any
 
 import polars as pl
 import pytest
 from quant_trading_strategy_backtester.app import (
     _get_final_backtest_data,
+    _get_final_backtest_results,
     prepare_buy_and_hold_strategy_with_optimisation,
     prepare_pairs_trading_strategy_with_optimisation,
     prepare_single_ticker_strategy_with_optimisation,
@@ -886,6 +888,49 @@ def test_get_final_backtest_data_uses_validation_split():
     assert len(full_data) == 100
 
 
+def test_get_final_backtest_results_preserves_context_and_resets_returns():
+    """Verify validation display uses contextual results but validation returns."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
+    context_results = pl.DataFrame(
+        {
+            "Date": dates,
+            "signal": [0.0, 0.0, 1.0, 1.0, 1.0, 0.0, -1.0, -1.0, 0.0, 0.0],
+            "position_change": [0.0, 0.0, 1.0, 0.0, 0.0, -1.0, -1.0, 0.0, 1.0, 0.0],
+            "gross_strategy_returns": [0.1] * 10,
+            "transaction_costs": [0.01] * 10,
+            "strategy_returns": [0.09] * 10,
+            "trade_turnover": [0.0] * 10,
+            "cumulative_transaction_costs": [0.01 * (i + 1) for i in range(10)],
+            "gross_cumulative_returns": [99.0] * 10,
+            "cumulative_returns": [99.0] * 10,
+            "equity_curve": [9_999_999.0] * 10,
+        }
+    )
+    validation_data = pl.DataFrame({"Date": dates[7:]})
+
+    final_results = _get_final_backtest_results(
+        context_results,
+        validation_data,
+        use_validation_data=True,
+        initial_capital=100_000.0,
+    )
+
+    assert final_results["Date"].to_list() == dates[7:]
+    assert final_results["signal"].to_list() == [-1.0, 0.0, 0.0]
+    assert final_results["cumulative_returns"].to_list() == pytest.approx(
+        [1.09, 1.1881, 1.295029]
+    )
+    assert final_results["gross_cumulative_returns"].to_list() == pytest.approx(
+        [1.1, 1.21, 1.331]
+    )
+    assert final_results["cumulative_transaction_costs"].to_list() == pytest.approx(
+        [0.01, 0.02, 0.03]
+    )
+    assert final_results["equity_curve"].to_list() == pytest.approx(
+        [109_000.0, 118_810.0, 129_502.9]
+    )
+
+
 def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
     """Verify optimise_strategy_params evaluates best params on test data."""
     train_data = pl.DataFrame(
@@ -938,6 +983,68 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
     # Metrics should be from test data
     assert metrics["Sharpe Ratio"] == 0.5
     assert metrics["Total Return"] == 0.05
+
+
+def test_optimise_strategy_params_skips_nan_sharpe(monkeypatch):
+    """Verify optimisation ignores parameter sets with undefined Sharpe."""
+    data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
+            "Close": [100 + i for i in range(21)],
+        }
+    )
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        sharpe = math.nan if params["short_window"] == 5 else 1.0
+        return None, {
+            "Sharpe Ratio": sharpe,
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    params, metrics = optimise_strategy_params(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [5, 10], "long_window": [20]},
+        "AAPL",
+    )
+
+    assert params == {"short_window": 10, "long_window": 20}
+    assert metrics["Sharpe Ratio"] == 1.0
+
+
+def test_optimise_strategy_params_raises_when_all_sharpes_are_nan(monkeypatch):
+    """Verify optimisation fails clearly when every candidate is untradeable."""
+    data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
+            "Close": [100 + i for i in range(21)],
+        }
+    )
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        return None, {
+            "Sharpe Ratio": math.nan,
+            "Total Return": 0.0,
+            "Max Drawdown": 0.0,
+            "Trade Events": 0.0,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    with pytest.raises(ValueError, match="Parameter optimisation failed"):
+        optimise_strategy_params(
+            data,
+            "Moving Average Crossover",
+            {"short_window": [5, 10], "long_window": [20]},
+            "AAPL",
+        )
 
 
 def test_optimise_strategy_params_skips_invalid_parameter_combinations(
