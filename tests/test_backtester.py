@@ -8,7 +8,7 @@ from typing import Any
 
 import polars as pl
 import pytest
-from quant_trading_strategy_backtester.backtester import Backtester
+from quant_trading_strategy_backtester.backtester import Backtester, build_trade_ledger
 from quant_trading_strategy_backtester.models import StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
@@ -124,7 +124,17 @@ def test_backtester_run(
     backtester = Backtester(data, strategy)
     results = backtester.run()
     assert isinstance(results, pl.DataFrame)
-    EXPECTED_COLS = {"position_change", "strategy_returns", "equity_curve"}
+    EXPECTED_COLS = {
+        "position_change",
+        "gross_strategy_returns",
+        "transaction_costs",
+        "strategy_returns",
+        "trade_turnover",
+        "cumulative_transaction_costs",
+        "gross_cumulative_returns",
+        "cumulative_returns",
+        "equity_curve",
+    }
     for col in EXPECTED_COLS:
         assert col in results.columns
 
@@ -157,7 +167,16 @@ def test_backtester_get_performance_metrics(
     backtester.run()
     metrics = backtester.get_performance_metrics()
     assert isinstance(metrics, dict)
-    EXPECTED_METRICS = {"Total Return", "Sharpe Ratio", "Max Drawdown"}
+    EXPECTED_METRICS = {
+        "Total Return",
+        "Gross Total Return",
+        "Sharpe Ratio",
+        "Max Drawdown",
+        "Total Costs",
+        "Cost Drag",
+        "Trade Events",
+        "Total Turnover",
+    }
     for metric in EXPECTED_METRICS:
         assert metric in metrics
 
@@ -385,6 +404,42 @@ def test_transaction_costs_reduce_returns():
         )
 
 
+def test_backtester_reports_cost_attribution_metrics():
+    """
+    Verify that performance metrics include gross returns and cost drag.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+                datetime.date(2020, 1, 4),
+            ],
+            "Close": [100.0, 110.0, 121.0, 133.1],
+        }
+    )
+    signals = [0.0, 1.0, 1.0, 0.0]
+    strategy = MockHoldingStrategy({"signals": signals})
+    backtester = Backtester(data, strategy, transaction_cost_bps=10.0, slippage_bps=5.0)
+
+    results = backtester.run()
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    assert results["gross_strategy_returns"].to_list() == pytest.approx(
+        [0.0, 0.0, 0.1, 0.1]
+    )
+    assert results["transaction_costs"].to_list() == pytest.approx(
+        [0.0, 0.0015, 0.0, 0.0015]
+    )
+    assert metrics["Gross Total Return"] > metrics["Total Return"]
+    assert metrics["Total Costs"] == pytest.approx(0.003)
+    assert metrics["Cost Drag"] > 0
+    assert metrics["Trade Events"] == 2
+    assert metrics["Total Turnover"] == 2
+
+
 def test_default_transaction_costs_reduce_returns():
     """
     Verify that the default transaction costs (5bps each) produce
@@ -520,7 +575,105 @@ def test_pairs_costs_use_leg_weight_changes():
 
     cost_rate = 15.0 / 10_000
     assert results["pair_turnover"].to_list() == pytest.approx([0.0, 1.0, 1 / 3, 0.0])
+    assert results["trade_turnover"].to_list() == pytest.approx([0.0, 1.0, 1 / 3, 0.0])
+    assert results["transaction_costs"].to_list() == pytest.approx(
+        [0.0, cost_rate, cost_rate / 3, 0.0]
+    )
     assert results["strategy_returns"].to_list() == pytest.approx(
         [0.0, -cost_rate, -(cost_rate / 3), 0.0]
     )
     assert results["position_change"].to_list() == [0.0, 1.0, 0.0, 0.0]
+
+
+def test_trade_ledger_records_single_asset_entries_and_exits():
+    """
+    Verify that the trade ledger captures entry, exit, costs, and holding time.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+                datetime.date(2020, 1, 4),
+            ],
+            "Close": [100.0, 110.0, 121.0, 133.1],
+        }
+    )
+    strategy = MockHoldingStrategy({"signals": [0.0, 1.0, 1.0, 0.0]})
+    backtester = Backtester(data, strategy, transaction_cost_bps=10.0, slippage_bps=5.0)
+    results = backtester.run()
+
+    ledger = build_trade_ledger(results)
+
+    assert ledger["Action"].to_list() == ["Enter Long", "Exit Long"]
+    assert ledger["Reason"].to_list() == [
+        "Strategy signal changed",
+        "Strategy signal changed",
+    ]
+    assert ledger["Transaction Costs"].to_list() == pytest.approx([0.0015, 0.0015])
+    assert ledger["Holding Period Days"].to_list() == [None, 2]
+
+
+def test_trade_ledger_normalises_datetime_dates():
+    """
+    Verify that live datetime dates can be rendered in the trade ledger.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.datetime(2020, 1, 1),
+                datetime.datetime(2020, 1, 2),
+                datetime.datetime(2020, 1, 3),
+            ],
+            "Close": [100.0, 110.0, 121.0],
+        }
+    )
+    strategy = MockHoldingStrategy({"signals": [0.0, 1.0, 0.0]})
+    backtester = Backtester(data, strategy)
+    results = backtester.run()
+
+    ledger = build_trade_ledger(results)
+
+    assert ledger["Date"].dtype == pl.Date
+    assert ledger["Date"].to_list() == [
+        datetime.date(2020, 1, 2),
+        datetime.date(2020, 1, 3),
+    ]
+
+
+def test_trade_ledger_records_pair_rebalances():
+    """
+    Verify that pair leg-weight changes are visible even without signal changes.
+    """
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1),
+                datetime.date(2020, 1, 2),
+                datetime.date(2020, 1, 3),
+            ],
+            "Close_1": [100.0, 100.0, 100.0],
+            "Close_2": [100.0, 100.0, 100.0],
+        }
+    )
+    strategy = MockPairsWeightedStrategy(
+        {
+            "signals": [0.0, 1.0, 1.0],
+            "leg_1_weights": [0.0, 0.5, 1 / 3],
+            "leg_2_weights": [0.0, -0.5, -2 / 3],
+        }
+    )
+    backtester = Backtester(data, strategy, transaction_cost_bps=10.0, slippage_bps=5.0)
+    results = backtester.run()
+
+    ledger = build_trade_ledger(results)
+
+    assert ledger["Action"].to_list() == ["Enter Long", "Rebalance"]
+    assert ledger["Reason"].to_list() == [
+        "Strategy signal changed",
+        "Leg weights changed",
+    ]
+    assert ledger["Turnover"].to_list() == pytest.approx([1.0, 1 / 3])
+    assert ledger["Leg 1 Weight"].to_list() == pytest.approx([0.5, 1 / 3])
+    assert ledger["Leg 2 Weight"].to_list() == pytest.approx([-0.5, -2 / 3])

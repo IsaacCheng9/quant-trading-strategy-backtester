@@ -21,6 +21,8 @@ _Try the deployed app
   and stock selection from S&P 500
 - **Transaction costs and slippage modelling** – configurable fees and slippage
   for realistic performance estimates
+- **Trade ledger and cost attribution** – explicit trade events, turnover,
+  gross/net returns, and cumulative cost drag
 - **Efficient data processing** – vectorised computation using Polars for
   improved performance
 - **Interactive web-based dashboard** – Streamlit UI for strategy configuration,

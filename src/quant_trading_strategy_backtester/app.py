@@ -45,6 +45,7 @@ from quant_trading_strategy_backtester.utils import (
 from quant_trading_strategy_backtester.visualisation import (
     display_performance_metrics,
     display_returns_by_month,
+    display_trade_ledger,
     plot_equity_curve,
     plot_pairs_spread,
     plot_strategy_returns,
@@ -667,6 +668,7 @@ def main():
         )
     plot_strategy_returns(results, ticker_display, company_display)
     display_returns_by_month(results)
+    display_trade_ledger(results)
 
     # Display the raw data from Yahoo Finance for the backtest period
     st.header(f"Raw Data for {company_display}")
