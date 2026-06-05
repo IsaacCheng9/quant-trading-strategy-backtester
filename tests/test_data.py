@@ -82,9 +82,7 @@ def test_load_yfinance_data_two_tickers_preserves_requested_order(
 
     def mock_download(*args, **kwargs):
         assert args[0] == ["AAPL", "MSFT"]
-        columns = pd.MultiIndex.from_tuples(
-            [("Close", "MSFT"), ("Close", "AAPL")]
-        )
+        columns = pd.MultiIndex.from_tuples([("Close", "MSFT"), ("Close", "AAPL")])
         return pd.DataFrame(
             [[200.0, 100.0], [201.0, 101.0], [202.0, 102.0]],
             index=dates,
@@ -108,9 +106,7 @@ def test_load_yfinance_data_two_tickers_handles_ticker_first_columns(
     dates = pd.date_range(start="1/1/2020", end="1/3/2020")
 
     def mock_download(*args, **kwargs):
-        columns = pd.MultiIndex.from_tuples(
-            [("AAPL", "Close"), ("MSFT", "Close")]
-        )
+        columns = pd.MultiIndex.from_tuples([("AAPL", "Close"), ("MSFT", "Close")])
         return pd.DataFrame(
             [[100.0, 200.0], [101.0, 201.0], [102.0, 202.0]],
             index=dates,
@@ -151,9 +147,7 @@ def test_load_yfinance_data_two_tickers_requires_both_close_columns(
     dates = pd.date_range(start="1/1/2020", end="1/3/2020")
 
     def mock_download(*args, **kwargs):
-        columns = pd.MultiIndex.from_tuples(
-            [("Close", "AAPL"), ("Open", "MSFT")]
-        )
+        columns = pd.MultiIndex.from_tuples([("Close", "AAPL"), ("Open", "MSFT")])
         return pd.DataFrame(
             [[100.0, 200.0], [101.0, 201.0], [102.0, 202.0]],
             index=dates,

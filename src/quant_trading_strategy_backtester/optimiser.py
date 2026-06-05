@@ -330,9 +330,7 @@ def optimise_strategy_params(
     best_metrics = None
     best_sharpe_ratio = float("-inf")
 
-    param_combinations = _valid_parameter_combinations(
-        strategy_type, parameter_ranges
-    )
+    param_combinations = _valid_parameter_combinations(strategy_type, parameter_ranges)
     total_combinations = len(param_combinations)
     if total_combinations == 0:
         raise ValueError(f"No valid parameter combinations for {strategy_type}")
@@ -501,9 +499,7 @@ def walk_forward_optimise(
             f"{n_rows} rows, need at least {2 * (n_folds + 1)}"
         )
 
-    param_combinations = _valid_parameter_combinations(
-        strategy_type, parameter_ranges
-    )
+    param_combinations = _valid_parameter_combinations(strategy_type, parameter_ranges)
     if not param_combinations:
         raise ValueError(f"No valid parameter combinations for {strategy_type}")
 
