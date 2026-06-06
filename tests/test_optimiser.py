@@ -18,6 +18,8 @@ from quant_trading_strategy_backtester.app import (
 from quant_trading_strategy_backtester.cointegration import CointegrationResult
 from quant_trading_strategy_backtester.optimiser import (
     _split_data,
+    count_candidate_pairs,
+    count_valid_parameter_combinations,
     get_training_data,
     get_validation_data,
     optimise_buy_and_hold_ticker,
@@ -41,6 +43,36 @@ def _cointegration_result(is_cointegrated: bool) -> CointegrationResult:
         critical_value_10pct=-3.0,
         reason=None if is_cointegrated else "Pair is not cointegrated",
     )
+
+
+def test_count_valid_parameter_combinations_filters_invalid_combinations() -> None:
+    """Verify optimisation reporting counts valid grid candidates only."""
+    assert (
+        count_valid_parameter_combinations(
+            "Moving Average Crossover",
+            {"short_window": [10, 30], "long_window": [20]},
+        )
+        == 1
+    )
+    assert (
+        count_valid_parameter_combinations(
+            "Moving Average Crossover",
+            {"short_window": 10, "long_window": 20},
+        )
+        == 1
+    )
+
+
+def test_count_candidate_pairs_excludes_same_company_pairs(monkeypatch) -> None:
+    """Verify pair reporting counts candidates after same-company filtering."""
+    top_companies = [("GOOG", 1.0), ("GOOGL", 0.9), ("MSFT", 0.8)]
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.is_same_company",
+        lambda ticker1, ticker2: {ticker1, ticker2} == {"GOOG", "GOOGL"},
+    )
+
+    assert count_candidate_pairs(top_companies) == 2
 
 
 def test_optimise_buy_and_hold_ticker(monkeypatch):

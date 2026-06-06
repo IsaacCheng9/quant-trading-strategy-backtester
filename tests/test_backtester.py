@@ -8,7 +8,11 @@ from typing import Any
 
 import polars as pl
 import pytest
-from quant_trading_strategy_backtester.backtester import Backtester, build_trade_ledger
+from quant_trading_strategy_backtester.backtester import (
+    TRADING_DAYS_PER_YEAR,
+    Backtester,
+    build_trade_ledger,
+)
 from quant_trading_strategy_backtester.models import StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
@@ -171,7 +175,10 @@ def test_backtester_get_performance_metrics(
         "Total Return",
         "Gross Total Return",
         "Sharpe Ratio",
+        "Sortino Ratio",
+        "Calmar Ratio",
         "Max Drawdown",
+        "Max Drawdown Duration",
         "Total Costs",
         "Cost Drag",
         "Trade Events",
@@ -438,6 +445,57 @@ def test_backtester_reports_cost_attribution_metrics():
     assert metrics["Cost Drag"] > 0
     assert metrics["Trade Events"] == 2
     assert metrics["Total Turnover"] == 2
+
+
+def test_backtester_reports_downside_and_drawdown_risk_metrics() -> None:
+    """
+    Verify downside risk, drawdown depth, and drawdown duration metrics.
+    """
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(6)]
+    strategy_returns = [0.0, -0.1, -1 / 9, 0.375, -1 / 11, 0.2]
+    equity_curve = [100_000.0, 90_000.0, 80_000.0, 110_000.0, 100_000.0, 120_000.0]
+    cumulative_returns = [equity / 100_000.0 for equity in equity_curve]
+    results = pl.DataFrame(
+        {
+            "Date": dates,
+            "signal": [1.0] * 6,
+            "position_change": [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "gross_strategy_returns": strategy_returns,
+            "strategy_returns": strategy_returns,
+            "transaction_costs": [0.0] * 6,
+            "trade_turnover": [0.0] * 6,
+            "gross_cumulative_returns": cumulative_returns,
+            "cumulative_returns": cumulative_returns,
+            "cumulative_transaction_costs": [0.0] * 6,
+            "equity_curve": equity_curve,
+        }
+    )
+    backtester = Backtester(
+        pl.DataFrame({"Date": dates, "Close": [100.0] * 6}),
+        BuyAndHoldStrategy({}),
+    )
+    backtester.results = results
+
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    downside_deviation = math.sqrt(
+        sum(min(return_value, 0.0) ** 2 for return_value in strategy_returns)
+        / len(strategy_returns)
+    )
+    expected_sortino = (
+        (TRADING_DAYS_PER_YEAR**0.5)
+        * (sum(strategy_returns) / len(strategy_returns))
+        / downside_deviation
+    )
+    expected_calmar = (
+        1.2 ** (TRADING_DAYS_PER_YEAR / (len(strategy_returns) - 1)) - 1
+    ) / 0.2
+
+    assert metrics["Sortino Ratio"] == pytest.approx(expected_sortino)
+    assert metrics["Calmar Ratio"] == pytest.approx(expected_calmar)
+    assert metrics["Max Drawdown"] == pytest.approx(-0.2)
+    assert metrics["Max Drawdown Duration"] == 2
 
 
 def test_default_transaction_costs_reduce_returns():
