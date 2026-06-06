@@ -33,8 +33,8 @@ _Try the deployed app
   backtesting, and analysis
 - **Trade and spread visualisation** – equity curves with trade markers and
   pairs spread z-score charts with entry/exit threshold bands
-- **Performance metrics** – Total Return, Sharpe Ratio, Max Drawdown, and
-  monthly performance table with rolling returns
+- **Performance metrics** – total return, Sharpe, Sortino, Calmar, drawdown
+  depth/duration, and monthly performance table with rolling returns
 - **Real-time data fetching** – adjusted historical market data from Yahoo
   Finance
 
@@ -49,6 +49,9 @@ _Try the deployed app
   look-ahead bias
 - **Benchmark comparison** aligns the strategy and SPY return streams by date
   over the displayed backtest period before calculating relative metrics
+- **Optimisation reporting** shows valid parameter combinations, candidate
+  ticker/pair counts, and whether displayed results come from full-period,
+  held-out, or walk-forward evaluation
 - **Walk-forward validation** uses expanding training windows for more
   robust out-of-sample evaluation – recommended over the default split
 - **Survivorship bias** remains a limitation – automatic ticker selection uses
