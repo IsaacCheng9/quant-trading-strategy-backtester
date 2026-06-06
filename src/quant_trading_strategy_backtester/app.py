@@ -91,13 +91,26 @@ def _get_final_backtest_data(
         optimised backtests.
     """
     if not use_validation_data:
+        st.info(
+            f"Displaying full-period backtest results over {len(data)} rows. "
+            "No ticker-selection or parameter-optimisation split was applied."
+        )
         return data
 
     validation_data = get_validation_data(data, walk_forward=walk_forward)
+    training_data = get_training_data(data, walk_forward=walk_forward)
     if walk_forward:
-        st.info("Displaying final walk-forward test-fold backtest results.")
+        st.info(
+            "Displaying final walk-forward test-fold backtest results "
+            f"over {len(validation_data)} rows after expanding-window "
+            f"optimisation on {len(training_data)} prior rows."
+        )
     else:
-        st.info("Displaying held-out test-period backtest results.")
+        st.info(
+            "Displaying held-out test-period backtest results over "
+            f"{len(validation_data)} rows after selection or optimisation "
+            f"on {len(training_data)} training rows."
+        )
     return validation_data
 
 

@@ -7,6 +7,7 @@ import datetime
 import itertools
 import math
 import time
+from collections.abc import Mapping
 from typing import Any, cast
 
 import polars as pl
@@ -130,6 +131,48 @@ def _optimisation_score(
     return score
 
 
+def count_valid_parameter_combinations(
+    strategy_type: str,
+    parameter_ranges: Mapping[str, range | list[int | float] | int | float],
+) -> int:
+    """Return the number of valid scalar parameter combinations."""
+    return len(_valid_parameter_combinations(strategy_type, parameter_ranges))
+
+
+def count_candidate_pairs(top_companies: list[tuple[str, float]]) -> int:
+    """Return pair candidates after same-company filtering."""
+    return len(_candidate_pairs(top_companies))
+
+
+def _display_parameter_search_context(
+    data: pl.DataFrame,
+    strategy_type: str,
+    parameter_ranges: Mapping[str, range | list[int | float] | int | float],
+    walk_forward: bool,
+) -> None:
+    """Display durable Streamlit context for parameter optimisation."""
+    valid_combinations = count_valid_parameter_combinations(
+        strategy_type, parameter_ranges
+    )
+    if walk_forward:
+        st.info(
+            "Parameter optimisation tests "
+            f"{valid_combinations} valid combinations across "
+            f"{WALK_FORWARD_FOLDS} expanding walk-forward folds. "
+            "Displayed optimisation metrics are aggregated out-of-sample "
+            "fold results."
+        )
+        return
+
+    train_data, test_data = _split_data(data)
+    st.info(
+        "Parameter optimisation tests "
+        f"{valid_combinations} valid combinations on {len(train_data)} "
+        f"training rows. Displayed optimisation metrics use {len(test_data)} "
+        "held-out test rows."
+    )
+
+
 def run_optimisation(
     data: pl.DataFrame,
     strategy_type: str,
@@ -166,6 +209,12 @@ def run_optimisation(
         )
         st.success(f"Best ticker for Buy and Hold: {best_ticker}")
     elif walk_forward:
+        _display_parameter_search_context(
+            data,
+            strategy_type,
+            cast(dict[str, range | list[int | float] | int | float], strategy_params),
+            walk_forward=True,
+        )
         strategy_params, metrics, fold_results = walk_forward_optimise(
             data,
             strategy_type,
@@ -175,6 +224,12 @@ def run_optimisation(
         _display_walk_forward_results(fold_results)
     else:
         train_data, test_data = _split_data(data)
+        _display_parameter_search_context(
+            data,
+            strategy_type,
+            cast(dict[str, range | list[int | float] | int | float], strategy_params),
+            walk_forward=False,
+        )
         strategy_params, metrics = optimise_strategy_params(
             train_data,
             strategy_type,
@@ -244,6 +299,7 @@ def optimise_buy_and_hold_ticker(
     best_ticker = None
     best_test_data = None
     best_total_return = float("-inf")
+    evaluated_tickers = 0
 
     total_tickers = len(top_companies)
     progress_bar = st.progress(0)
@@ -257,6 +313,7 @@ def optimise_buy_and_hold_ticker(
         if data is None or data.is_empty():
             continue
 
+        evaluated_tickers += 1
         train_data, test_data = _split_data(data)
 
         backtester = Backtester(train_data, BuyAndHoldStrategy({}), tickers=ticker)
@@ -274,6 +331,11 @@ def optimise_buy_and_hold_ticker(
 
     progress_bar.empty()
     status_text.empty()
+    st.info(
+        f"Ticker selection evaluated {evaluated_tickers} of {total_tickers} "
+        "candidates. Ranking used the training split and final metrics use "
+        "the held-out test split."
+    )
 
     if not best_ticker or best_test_data is None:
         raise ValueError("Buy and Hold optimisation failed")
@@ -313,6 +375,7 @@ def optimise_single_ticker_strategy_ticker(
     """
     best_ticker = None
     best_sharpe_ratio = float("-inf")
+    evaluated_tickers = 0
 
     total_tickers = len(top_companies)
     progress_bar = st.progress(0)
@@ -332,6 +395,7 @@ def optimise_single_ticker_strategy_ticker(
         if data is None or data.is_empty():
             continue
 
+        evaluated_tickers += 1
         train_data, _ = _split_data(data)
         _, train_metrics = run_backtest(train_data, strategy_type, fixed_params, ticker)
 
@@ -342,6 +406,11 @@ def optimise_single_ticker_strategy_ticker(
 
     progress_bar.empty()
     status_text.empty()
+    st.info(
+        f"Ticker selection evaluated {evaluated_tickers} of {total_tickers} "
+        "candidates. Ranking used the training split; displayed results use "
+        "the validation split."
+    )
 
     if not best_ticker:
         raise ValueError("Single ticker strategy ticker optimisation failed")
@@ -448,15 +517,21 @@ def optimise_pairs_trading_tickers(
     best_params = None
     best_test_data = None
     best_sharpe_ratio = float("-inf")
+    evaluated_pairs = 0
 
-    ticker_pairs = list(
-        itertools.combinations([company[0] for company in top_companies], 2)
-    )
-    # Filter out pairs that likely represent the same company
-    ticker_pairs = [
-        pair for pair in ticker_pairs if not is_same_company(pair[0], pair[1])
-    ]
+    ticker_pairs = _candidate_pairs(top_companies)
     total_combinations = len(ticker_pairs)
+    parameter_combinations = 0
+    optimisation_parameter_ranges = None
+    if optimise:
+        optimisation_parameter_ranges = {
+            k: [v] if isinstance(v, (int, float)) else v
+            for k, v in strategy_params.items()
+        }
+        parameter_combinations = count_valid_parameter_combinations(
+            "Pairs Trading", optimisation_parameter_ranges
+        )
+
     # Display progress bar and status text, as this process may take a while.
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -475,6 +550,7 @@ def optimise_pairs_trading_tickers(
         if data is None or data.is_empty():
             continue
 
+        evaluated_pairs += 1
         train_data, test_data = _split_data(data)
         cointegration_result = evaluate_cointegration(
             train_data,
@@ -487,15 +563,13 @@ def optimise_pairs_trading_tickers(
             continue
 
         if optimise:
-            # Convert single values to lists for optimisation
-            param_ranges = {
-                k: [v] if isinstance(v, (int, float)) else v
-                for k, v in strategy_params.items()
-            }
             current_params, train_metrics = optimise_strategy_params(
                 train_data,
                 "Pairs Trading",
-                param_ranges,
+                cast(
+                    dict[str, range | list[int | float]],
+                    optimisation_parameter_ranges,
+                ),
                 [ticker1, ticker2],
             )
         else:
@@ -521,6 +595,21 @@ def optimise_pairs_trading_tickers(
             "Pairs trading optimisation failed: no cointegrated pair produced "
             f"a finite Sharpe ratio ({rejected_pairs} pairs rejected by "
             "cointegration filter)"
+        )
+
+    cointegrated_pairs = evaluated_pairs - rejected_pairs
+    st.info(
+        f"Pair selection evaluated {evaluated_pairs} of {total_combinations} "
+        f"candidate pairs. The cointegration filter rejected {rejected_pairs}; "
+        "ranking used the training split and final metrics use the held-out "
+        "test split."
+    )
+    if optimise:
+        st.info(
+            "Pair parameter optimisation tested "
+            f"{parameter_combinations} valid combinations per cointegrated "
+            f"pair ({cointegrated_pairs * parameter_combinations} training "
+            "backtests)."
         )
 
     _, best_metrics = run_backtest(
@@ -623,7 +712,7 @@ def walk_forward_optimise(
 
 def _valid_parameter_combinations(
     strategy_type: str,
-    parameter_ranges: dict[str, range | list[int | float]],
+    parameter_ranges: Mapping[str, range | list[int | float] | int | float],
 ) -> list[dict[str, int | float]]:
     """
     Return scalar parameter combinations that pass strategy validation.
@@ -636,10 +725,7 @@ def _valid_parameter_combinations(
         Valid scalar parameter dictionaries for grid search.
     """
     param_names = list(parameter_ranges.keys())
-    param_values = [
-        list(value) if isinstance(value, range) else value
-        for value in parameter_ranges.values()
-    ]
+    param_values = [_parameter_values(value) for value in parameter_ranges.values()]
 
     return [
         current_params
@@ -648,6 +734,26 @@ def _valid_parameter_combinations(
             strategy_type, current_params := dict(zip(param_names, params))
         )
     ]
+
+
+def _parameter_values(
+    value: range | list[int | float] | int | float,
+) -> list[int | float]:
+    """Return parameter candidate values from ranges, lists, or scalars."""
+    if isinstance(value, range):
+        return list(value)
+    if isinstance(value, list):
+        return value
+
+    return [value]
+
+
+def _candidate_pairs(top_companies: list[tuple[str, float]]) -> list[tuple[str, str]]:
+    """Return ticker pairs after excluding likely same-company pairs."""
+    ticker_pairs = list(
+        itertools.combinations([company[0] for company in top_companies], 2)
+    )
+    return [pair for pair in ticker_pairs if not is_same_company(pair[0], pair[1])]
 
 
 def run_backtest(
