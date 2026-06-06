@@ -23,6 +23,8 @@ _Try the deployed app
   for realistic performance estimates
 - **Trade ledger and cost attribution** – explicit trade events, turnover,
   gross/net returns, and cumulative cost drag
+- **Cointegration-gated pairs selection** – Engle-Granger filtering for
+  automatic pairs trading selection and p-value diagnostics for manual pairs
 - **Efficient data processing** – vectorised computation using Polars for
   improved performance
 - **Interactive web-based dashboard** – Streamlit UI for strategy configuration,
@@ -38,7 +40,8 @@ _Try the deployed app
 
 - **Pairs trading** uses a rolling hedge ratio to build the spread and
   exposure-normalised leg weights to calculate pair returns and transaction
-  costs
+  costs. Automatic pair selection first filters candidates using an
+  Engle-Granger cointegration test on the training split
 - **Ticker/pair selection** uses a 70/30 train/test split – tickers are
   selected on training data and evaluated on held-out test data to reduce
   look-ahead bias
