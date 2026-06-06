@@ -25,6 +25,8 @@ _Try the deployed app
   gross/net returns, and cumulative cost drag
 - **Cointegration-gated pairs selection** – Engle-Granger filtering for
   automatic pairs trading selection and p-value diagnostics for manual pairs
+- **Benchmark-relative reporting** – SPY-relative excess return, beta,
+  annualised alpha, and information ratio for the displayed backtest period
 - **Efficient data processing** – vectorised computation using Polars for
   improved performance
 - **Interactive web-based dashboard** – Streamlit UI for strategy configuration,
@@ -45,6 +47,8 @@ _Try the deployed app
 - **Ticker/pair selection** uses a 70/30 train/test split – tickers are
   selected on training data and evaluated on held-out test data to reduce
   look-ahead bias
+- **Benchmark comparison** aligns the strategy and SPY return streams by date
+  over the displayed backtest period before calculating relative metrics
 - **Walk-forward validation** uses expanding training windows for more
   robust out-of-sample evaluation – recommended over the default split
 - **Survivorship bias** remains a limitation – automatic ticker selection uses
