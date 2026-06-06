@@ -18,6 +18,10 @@ import polars as pl
 import streamlit as st
 
 from quant_trading_strategy_backtester.backtester import Backtester, is_running_locally
+from quant_trading_strategy_backtester.benchmark import (
+    BENCHMARK_TICKER,
+    calculate_benchmark_relative_metrics,
+)
 from quant_trading_strategy_backtester.cointegration import evaluate_cointegration
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
@@ -45,6 +49,7 @@ from quant_trading_strategy_backtester.utils import (
     NUM_TOP_COMPANIES_TWO_TICKERS,
 )
 from quant_trading_strategy_backtester.visualisation import (
+    display_benchmark_metrics,
     display_performance_metrics,
     display_returns_by_month,
     display_trade_ledger,
@@ -198,6 +203,69 @@ def _format_p_value(value: float) -> str:
         return "N/A"
 
     return f"{value:.4f}"
+
+
+def _get_benchmark_date_range(
+    data: pl.DataFrame,
+) -> tuple[datetime.date, datetime.date]:
+    """
+    Return the inclusive start and exclusive end dates for benchmark loading.
+
+    Args:
+        data: Backtest data containing a Date column.
+
+    Returns:
+        A start date and Yahoo-compatible exclusive end date.
+    """
+    start_date = _to_date(data["Date"].min())
+    end_date = _to_date(data["Date"].max()) + datetime.timedelta(days=1)
+    return start_date, end_date
+
+
+def _to_date(value: Any) -> datetime.date:
+    """Convert Polars scalar date values to Python dates."""
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    if hasattr(value, "date"):
+        date_value = value.date()
+        if isinstance(date_value, datetime.date):
+            return date_value
+
+    raise TypeError(f"Expected date-like value, got {type(value).__name__}")
+
+
+def _display_benchmark_comparison(
+    results: pl.DataFrame, backtest_data: pl.DataFrame
+) -> None:
+    """
+    Display strategy metrics relative to the default benchmark.
+
+    Args:
+        results: Backtest results for the displayed period.
+        backtest_data: Price data for the displayed period.
+    """
+    try:
+        benchmark_start_date, benchmark_end_date = _get_benchmark_date_range(
+            backtest_data
+        )
+        benchmark_data = load_yfinance_data_one_ticker(
+            BENCHMARK_TICKER, benchmark_start_date, benchmark_end_date
+        )
+    except Exception as exc:
+        st.warning(f"Benchmark comparison unavailable: {exc}")
+        return
+
+    benchmark_metrics = calculate_benchmark_relative_metrics(results, benchmark_data)
+    if benchmark_metrics["Benchmark Observations"] == 0:
+        st.warning(
+            "Benchmark comparison unavailable: no overlapping benchmark data "
+            f"for {BENCHMARK_TICKER}."
+        )
+        return
+
+    display_benchmark_metrics(benchmark_metrics, BENCHMARK_TICKER)
 
 
 # Trading strategy preparation functions
@@ -776,6 +844,7 @@ def main():
         )
 
     display_performance_metrics(metrics, company_display)
+    _display_benchmark_comparison(results, backtest_data)
     plot_equity_curve(
         results,
         ticker_display,

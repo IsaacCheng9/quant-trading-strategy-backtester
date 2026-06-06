@@ -67,6 +67,34 @@ def display_performance_metrics(
         )
 
 
+def display_benchmark_metrics(metrics: dict[str, float], benchmark_ticker: str) -> None:
+    """
+    Display benchmark-relative performance metrics.
+
+    Args:
+        metrics: A dictionary containing benchmark-relative metrics.
+        benchmark_ticker: The ticker symbol used as the benchmark.
+    """
+    st.subheader(f"Benchmark Comparison vs. {benchmark_ticker}")
+    benchmark_return_col, excess_return_col, beta_col = st.columns(3)
+    benchmark_return_col.metric(
+        "Benchmark Return", _format_metric(metrics["Benchmark Total Return"], ".4%")
+    )
+    excess_return_col.metric(
+        "Excess Return", _format_metric(metrics["Excess Return"], ".4%")
+    )
+    beta_col.metric("Beta", _format_metric(metrics["Beta"], ".4f"))
+
+    alpha_col, information_ratio_col, observations_col = st.columns(3)
+    alpha_col.metric("Annualised Alpha", _format_metric(metrics["Alpha"], ".4%"))
+    information_ratio_col.metric(
+        "Information Ratio", _format_metric(metrics["Information Ratio"], ".4f")
+    )
+    observations_col.metric(
+        "Aligned Days", _format_metric(metrics["Benchmark Observations"], ".0f")
+    )
+
+
 def plot_equity_curve(
     results: pl.DataFrame,
     ticker_display: str,
