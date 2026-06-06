@@ -8,6 +8,7 @@ this repository.
 """
 
 import json
+import math
 import platform
 from datetime import date, datetime
 from typing import Any
@@ -193,6 +194,88 @@ def _optional_float(row: dict[str, Any], name: str) -> float | None:
         return None
 
     return float(value)
+
+
+def _finite_values(series: pl.Series) -> list[float]:
+    """Return finite float values from a Polars series."""
+    values = []
+    for value in series:
+        if value is None:
+            continue
+        float_value = float(value)
+        if math.isfinite(float_value):
+            values.append(float_value)
+
+    return values
+
+
+def _calculate_sharpe_ratio(excess_returns: list[float]) -> float:
+    """Calculate annualised Sharpe ratio from daily excess returns."""
+    if len(excess_returns) < 2:
+        return float("nan")
+
+    returns_mean = sum(excess_returns) / len(excess_returns)
+    returns_variance = sum(
+        (return_value - returns_mean) ** 2 for return_value in excess_returns
+    ) / (len(excess_returns) - 1)
+    returns_std = math.sqrt(returns_variance)
+    if not returns_std or not math.isfinite(returns_std):
+        return float("nan")
+
+    return float((TRADING_DAYS_PER_YEAR**0.5) * returns_mean / returns_std)
+
+
+def _calculate_sortino_ratio(excess_returns: list[float]) -> float:
+    """Calculate annualised Sortino ratio from daily excess returns."""
+    if not excess_returns:
+        return float("nan")
+
+    downside_deviation = math.sqrt(
+        sum(min(return_value, 0.0) ** 2 for return_value in excess_returns)
+        / len(excess_returns)
+    )
+    if not downside_deviation or not math.isfinite(downside_deviation):
+        return float("nan")
+
+    returns_mean = sum(excess_returns) / len(excess_returns)
+    return float((TRADING_DAYS_PER_YEAR**0.5) * returns_mean / downside_deviation)
+
+
+def _calculate_max_drawdown_duration(drawdowns: pl.Series) -> float:
+    """Calculate the longest drawdown duration in trading rows."""
+    max_duration = 0
+    current_duration = 0
+
+    for value in drawdowns:
+        if value is None:
+            current_duration = 0
+            continue
+
+        drawdown = float(value)
+        if math.isfinite(drawdown) and drawdown < 0:
+            current_duration += 1
+            max_duration = max(max_duration, current_duration)
+        else:
+            current_duration = 0
+
+    return float(max_duration)
+
+
+def _calculate_calmar_ratio(
+    total_return: float, max_drawdown: float, periods: int
+) -> float:
+    """Calculate annualised return divided by absolute maximum drawdown."""
+    if (
+        periods <= 0
+        or total_return <= -1
+        or not math.isfinite(total_return)
+        or not math.isfinite(max_drawdown)
+        or math.isclose(max_drawdown, 0.0)
+    ):
+        return float("nan")
+
+    annualised_return = (1 + total_return) ** (TRADING_DAYS_PER_YEAR / periods) - 1
+    return float(annualised_return / abs(max_drawdown))
 
 
 class Backtester:
@@ -463,29 +546,34 @@ class Backtester:
         trade_events = float(self.results.filter(pl.col("trade_turnover") > 0).height)
 
         # Measure the risk-adjusted return.
-        periods = TRADING_DAYS_PER_YEAR
-        rf_daily = (1 + risk_free_return_rate_annual) ** (1 / periods) - 1
-        excess = self.results["strategy_returns"].cast(pl.Float64) - rf_daily
-        returns_mean = float(excess.mean())
-        returns_std = float(excess.std())
-        sharpe_ratio = (
-            float((periods**0.5) * returns_mean / returns_std)
-            if returns_std
-            else float("nan")
+        rf_daily = (1 + risk_free_return_rate_annual) ** (1 / TRADING_DAYS_PER_YEAR) - 1
+        excess_returns = _finite_values(
+            self.results["strategy_returns"].cast(pl.Float64) - rf_daily
         )
+        sharpe_ratio = _calculate_sharpe_ratio(excess_returns)
+        sortino_ratio = _calculate_sortino_ratio(excess_returns)
 
         # Measure the maximum loss from a peak to a trough of the equity curve.
         drawdowns = (
             self.results["equity_curve"] / self.results["equity_curve"].cum_max() - 1
         )
         max_drawdown = float(drawdowns.cast(pl.Float64).min())  # type: ignore
+        max_drawdown_duration = _calculate_max_drawdown_duration(
+            drawdowns.cast(pl.Float64)
+        )
+        calmar_ratio = _calculate_calmar_ratio(
+            total_return, max_drawdown, max(len(self.results) - 1, 1)
+        )
 
         # TODO: Split the calculations out into separate functions.
         return {
             "Total Return": total_return,
             "Gross Total Return": gross_total_return,
             "Sharpe Ratio": sharpe_ratio,
+            "Sortino Ratio": sortino_ratio,
+            "Calmar Ratio": calmar_ratio,
             "Max Drawdown": max_drawdown,
+            "Max Drawdown Duration": max_drawdown_duration,
             "Total Costs": total_costs,
             "Cost Drag": gross_total_return - total_return,
             "Trade Events": trade_events,

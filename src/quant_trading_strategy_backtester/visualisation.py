@@ -42,6 +42,23 @@ def display_performance_metrics(
     )
 
     if {
+        "Sortino Ratio",
+        "Calmar Ratio",
+        "Max Drawdown Duration",
+    }.issubset(metrics):
+        sortino_col, calmar_col, drawdown_duration_col = st.columns(3)
+        sortino_col.metric(
+            "Sortino Ratio", _format_metric(metrics["Sortino Ratio"], ".4f")
+        )
+        calmar_col.metric(
+            "Calmar Ratio", _format_metric(metrics["Calmar Ratio"], ".4f")
+        )
+        drawdown_duration_col.metric(
+            "Max Drawdown Duration",
+            _format_metric(metrics["Max Drawdown Duration"], ".0f"),
+        )
+
+    if {
         "Gross Total Return",
         "Total Costs",
         "Cost Drag",
