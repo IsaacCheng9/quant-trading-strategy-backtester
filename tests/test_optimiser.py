@@ -15,6 +15,7 @@ from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
     prepare_single_ticker_strategy_with_optimisation,
 )
+from quant_trading_strategy_backtester.cointegration import CointegrationResult
 from quant_trading_strategy_backtester.optimiser import (
     _split_data,
     get_validation_data,
@@ -26,6 +27,19 @@ from quant_trading_strategy_backtester.optimiser import (
     run_optimisation,
     walk_forward_optimise,
 )
+
+
+def _cointegration_result(is_cointegrated: bool) -> CointegrationResult:
+    """Return a deterministic cointegration result for optimiser tests."""
+    return CointegrationResult(
+        is_cointegrated=is_cointegrated,
+        p_value=0.01 if is_cointegrated else 0.5,
+        test_statistic=-4.0 if is_cointegrated else -1.0,
+        critical_value_1pct=-3.9,
+        critical_value_5pct=-3.3,
+        critical_value_10pct=-3.0,
+        reason=None if is_cointegrated else "Pair is not cointegrated",
+    )
 
 
 def test_optimise_buy_and_hold_ticker(monkeypatch):
@@ -201,6 +215,10 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         "quant_trading_strategy_backtester.optimiser.optimise_strategy_params",
         mock_optimise_strategy_params,
     )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_args, **_kwargs: _cointegration_result(True),
+    )
 
     start_date = datetime.date(2020, 1, 1)
     end_date = datetime.date(2020, 12, 31)
@@ -279,6 +297,10 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_args, **_kwargs: _cointegration_result(True),
     )
 
     best_pair, best_params, metrics = optimise_pairs_trading_tickers(
@@ -363,6 +385,10 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_args, **_kwargs: _cointegration_result(True),
     )
 
     best_pair, best_params, metrics = optimise_pairs_trading_tickers(

@@ -18,6 +18,7 @@ import polars as pl
 import streamlit as st
 
 from quant_trading_strategy_backtester.backtester import Backtester, is_running_locally
+from quant_trading_strategy_backtester.cointegration import evaluate_cointegration
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
@@ -27,6 +28,7 @@ from quant_trading_strategy_backtester.data import (
 from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
     create_strategy,
+    get_training_data,
     get_validation_data,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
@@ -163,6 +165,39 @@ def _get_performance_metrics_for_results(
     )
 
     return metrics
+
+
+def _display_cointegration_result(data: pl.DataFrame, context: str) -> None:
+    """
+    Display an Engle-Granger cointegration diagnostic for a selected pair.
+
+    Args:
+        data: Pair price data to test.
+        context: Description of the data period being tested.
+    """
+    result = evaluate_cointegration(data)
+    if result.is_cointegrated:
+        st.success(
+            "Cointegration filter passed "
+            f"({context}; Engle-Granger p-value: {result.p_value:.4f})."
+        )
+        return
+
+    reason = f" {result.reason}." if result.reason else ""
+    st.warning(
+        "Cointegration filter failed "
+        f"({context}; Engle-Granger p-value: {_format_p_value(result.p_value)})."
+        f"{reason} Manual pairs are still allowed, but the relationship may "
+        "not be mean-reverting."
+    )
+
+
+def _format_p_value(value: float) -> str:
+    """Format p-values for Streamlit diagnostics."""
+    if value != value:
+        return "N/A"
+
+    return f"{value:.4f}"
 
 
 # Trading strategy preparation functions
@@ -359,6 +394,10 @@ def prepare_pairs_trading_strategy_with_optimisation(
     # Load historical data for the selected pair.
     data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
     ticker_display = f"{ticker1} vs. {ticker2}"
+    _display_cointegration_result(
+        get_training_data(data),
+        "training split used for pair selection",
+    )
 
     if optimise and walk_forward:
         strategy_params, _ = run_optimisation(
@@ -429,6 +468,7 @@ def prepare_pairs_trading_strategy_without_optimisation(
     ticker1, ticker2 = ticker
     data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
     ticker_display = f"{ticker1} vs. {ticker2}"
+    _display_cointegration_result(data, "selected date range")
 
     if optimise:
         strategy_params, _ = run_optimisation(

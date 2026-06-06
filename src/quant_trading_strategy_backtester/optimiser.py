@@ -13,6 +13,10 @@ import polars as pl
 import streamlit as st
 
 from quant_trading_strategy_backtester.backtester import Backtester
+from quant_trading_strategy_backtester.cointegration import (
+    COINTEGRATION_P_VALUE_THRESHOLD,
+    evaluate_cointegration,
+)
 from quant_trading_strategy_backtester.data import (
     get_top_sp500_companies,
     is_same_company,
@@ -85,6 +89,34 @@ def get_validation_data(
 
     _, test_data = _split_data(data)
     return test_data
+
+
+def get_training_data(
+    data: pl.DataFrame, walk_forward: bool = False, n_folds: int = WALK_FORWARD_FOLDS
+) -> pl.DataFrame:
+    """
+    Return the training data used for ticker or parameter optimisation.
+
+    Args:
+        data: Historical price data.
+        walk_forward: Whether the optimisation used walk-forward validation.
+        n_folds: Number of walk-forward test folds.
+
+    Returns:
+        The standard training split, or the final walk-forward training
+        context.
+    """
+    if walk_forward:
+        segment_size = len(data) // (n_folds + 1)
+        if segment_size < 2:
+            raise ValueError(
+                f"Not enough data for {n_folds} folds: "
+                f"{len(data)} rows, need at least {2 * (n_folds + 1)}"
+            )
+        return data[: segment_size * n_folds]
+
+    train_data, _ = _split_data(data)
+    return train_data
 
 
 def _optimisation_score(
@@ -389,6 +421,7 @@ def optimise_pairs_trading_tickers(
     end_date: datetime.date,
     strategy_params: dict[str, Any],
     optimise: bool,
+    cointegration_p_value_threshold: float = COINTEGRATION_P_VALUE_THRESHOLD,
 ) -> tuple[tuple[str, str], dict[str, Any], dict[str, float]]:
     """
     Optimises ticker pair selection and strategy parameters for pairs trading.
@@ -404,6 +437,8 @@ def optimise_pairs_trading_tickers(
         end_date: End date for historical data.
         strategy_params: Strategy parameters or parameter ranges.
         optimise: Whether to optimise the strategy parameters.
+        cointegration_p_value_threshold: Maximum Engle-Granger p-value
+            accepted for automatic pair selection.
 
     Returns:
         A tuple containing the best ticker pair, best parameters, and best
@@ -426,6 +461,7 @@ def optimise_pairs_trading_tickers(
     progress_bar = st.progress(0)
     status_text = st.empty()
     prev_pair_processing_time = 0.0
+    rejected_pairs = 0
 
     for i, (ticker1, ticker2) in enumerate(ticker_pairs):
         start_time = time.time()
@@ -440,6 +476,15 @@ def optimise_pairs_trading_tickers(
             continue
 
         train_data, test_data = _split_data(data)
+        cointegration_result = evaluate_cointegration(
+            train_data,
+            p_value_threshold=cointegration_p_value_threshold,
+        )
+        if not cointegration_result.is_cointegrated:
+            rejected_pairs += 1
+            end_time = time.time()
+            prev_pair_processing_time = end_time - start_time
+            continue
 
         if optimise:
             # Convert single values to lists for optimisation
@@ -472,7 +517,11 @@ def optimise_pairs_trading_tickers(
     progress_bar.empty()
     status_text.empty()
     if not best_pair or not best_params or best_test_data is None:
-        raise ValueError("Pairs trading optimisation failed")
+        raise ValueError(
+            "Pairs trading optimisation failed: no cointegrated pair produced "
+            f"a finite Sharpe ratio ({rejected_pairs} pairs rejected by "
+            "cointegration filter)"
+        )
 
     _, best_metrics = run_backtest(
         best_test_data, "Pairs Trading", best_params, list(best_pair)
