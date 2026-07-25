@@ -7,6 +7,7 @@ import datetime
 import pandas as pd
 import polars as pl
 import pytest
+
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     is_same_company,
@@ -193,7 +194,7 @@ def test_get_full_company_name_failure(monkeypatch):
 
     # Test error handling
     def mock_ticker_info_error(*args, **kwargs):
-        raise Exception("API Error")
+        raise RuntimeError("API Error")
 
     monkeypatch.setattr("yfinance.Ticker", mock_ticker_info_error)
     assert get_full_company_name("ERROR") is None
@@ -229,7 +230,7 @@ def test_is_same_company_check_success(monkeypatch):
 def test_is_same_company_check_failure(monkeypatch):
     # Test error handling
     def mock_ticker_info_error(*args, **kwargs):
-        raise Exception("API Error")
+        raise RuntimeError("API Error")
 
     monkeypatch.setattr("yfinance.Ticker", mock_ticker_info_error)
     assert is_same_company("ERROR1", "ERROR2") is False
