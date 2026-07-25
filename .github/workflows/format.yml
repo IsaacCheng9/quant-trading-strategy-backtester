@@ -3,7 +3,7 @@ name: Format
 on: [push]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   format:
@@ -11,17 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ruff format
-        uses: astral-sh/ruff-action@v3
+      - name: Check Ruff formatting
+        uses: astral-sh/ruff-action@v4.1.0
         with:
-          args: format
+          args: format --check
+          version-file: uv.lock
 
-      - name: Ruff lint (fix)
-        uses: astral-sh/ruff-action@v3
+      - name: Check Ruff linting
+        uses: astral-sh/ruff-action@v4.1.0
         with:
-          args: check --fix
-
-      - name: Commit changes made by Ruff
-        uses: stefanzweifel/git-auto-commit-action@master
-        with:
-          commit_message: Format Python code with Ruff
+          args: check
+          version-file: uv.lock

@@ -840,7 +840,7 @@ def _valid_parameter_combinations(
 
 
 def _parameter_values(
-    value: range | list[int | float] | int | float,
+    value: range | list[int | float] | float,
 ) -> list[int | float]:
     """Return parameter candidate values from ranges, lists, or scalars."""
     if isinstance(value, range):

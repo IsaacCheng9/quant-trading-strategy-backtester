@@ -11,6 +11,7 @@ For instructions on how to run the application, refer to the README.md.
 
 import datetime
 import json
+import math
 import time
 from typing import Any, cast
 
@@ -160,7 +161,7 @@ def _display_cointegration_result(data: pl.DataFrame, context: str) -> None:
 
 def _format_p_value(value: float) -> str:
     """Format p-values for Streamlit diagnostics."""
-    if value != value:
+    if math.isnan(value):
         return "N/A"
 
     return f"{value:.4f}"
@@ -214,7 +215,7 @@ def _display_benchmark_comparison(
         benchmark_data = load_yfinance_data_one_ticker(
             BENCHMARK_TICKER, benchmark_start_date, benchmark_end_date
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         st.warning(f"Benchmark comparison unavailable: {exc}")
         return
 

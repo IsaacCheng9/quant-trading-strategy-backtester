@@ -152,7 +152,7 @@ def plot_equity_curve(
                 x=buys["Date"].to_list(),
                 y=buys["equity_curve"].to_list(),
                 mode="markers",
-                marker=dict(size=6, color="green", opacity=0.7),
+                marker={"size": 6, "color": "green", "opacity": 0.7},
                 name=long_label,
             )
         )
@@ -162,7 +162,7 @@ def plot_equity_curve(
                 x=sells["Date"].to_list(),
                 y=sells["equity_curve"].to_list(),
                 mode="markers",
-                marker=dict(size=6, color="red", opacity=0.7),
+                marker={"size": 6, "color": "red", "opacity": 0.7},
                 name=short_label,
             )
         )
@@ -265,7 +265,7 @@ def plot_pairs_spread(
                 x=buys["Date"].to_list(),
                 y=buys["z_score"].to_list(),
                 mode="markers",
-                marker=dict(size=6, color="green", opacity=0.7),
+                marker={"size": 6, "color": "green", "opacity": 0.7},
                 name="Long Spread",
             )
         )
@@ -275,7 +275,7 @@ def plot_pairs_spread(
                 x=sells["Date"].to_list(),
                 y=sells["z_score"].to_list(),
                 mode="markers",
-                marker=dict(size=6, color="red", opacity=0.7),
+                marker={"size": 6, "color": "red", "opacity": 0.7},
                 name="Short Spread",
             )
         )
