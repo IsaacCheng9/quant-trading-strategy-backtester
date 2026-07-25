@@ -52,6 +52,72 @@ def test_mean_reversion_strategy_generate_signals(
     assert signals["signal"].is_in([0.0, 1.0, -1.0]).all()
 
 
+def test_mean_reversion_holds_long_position_until_mean_cross() -> None:
+    start_date = date(2023, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(9)]
+    prices = [100.0, 100.0, 100.0, 100.0, 100.0, 80.0, 85.0, 90.0, 95.0]
+    data = pl.DataFrame({"Date": dates, "Close": prices})
+
+    strategy = MeanReversionStrategy({"window": 5, "std_dev": 1.0})
+    signals = strategy.generate_signals(data)
+
+    assert signals["signal"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        1.0,
+        0.0,
+    ]
+    assert signals["position_change"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        -1.0,
+    ]
+
+
+def test_mean_reversion_holds_short_position_until_mean_cross() -> None:
+    start_date = date(2023, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(9)]
+    prices = [100.0, 100.0, 100.0, 100.0, 100.0, 120.0, 115.0, 110.0, 105.0]
+    data = pl.DataFrame({"Date": dates, "Close": prices})
+
+    strategy = MeanReversionStrategy({"window": 5, "std_dev": 1.0})
+    signals = strategy.generate_signals(data)
+
+    assert signals["signal"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        -1.0,
+        -1.0,
+        0.0,
+    ]
+    assert signals["position_change"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+
+
 def test_mean_reversion_stays_flat_when_volatility_is_zero() -> None:
     start_date = date(2023, 1, 1)
     dates = [start_date + timedelta(days=i) for i in range(10)]
@@ -63,3 +129,22 @@ def test_mean_reversion_stays_flat_when_volatility_is_zero() -> None:
     assert (signals["std"].drop_nulls() == 0.0).all()
     assert (signals["signal"] == 0.0).all()
     assert (signals["position_change"] == 0.0).all()
+
+
+def test_mean_reversion_empty_data_uses_mean_reversion_schema() -> None:
+    empty_data = pl.DataFrame(schema=[("Date", pl.Date), ("Close", pl.Float64)])
+
+    strategy = MeanReversionStrategy({"window": 5, "std_dev": 2.0})
+    signals = strategy.generate_signals(empty_data)
+
+    assert signals.is_empty()
+    assert signals.schema == {
+        "Date": pl.Date,
+        "Close": pl.Float64,
+        "mean": pl.Float64,
+        "std": pl.Float64,
+        "upper_band": pl.Float64,
+        "lower_band": pl.Float64,
+        "signal": pl.Float64,
+        "position_change": pl.Float64,
+    }

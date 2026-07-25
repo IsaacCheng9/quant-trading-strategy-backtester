@@ -5,6 +5,8 @@ that asset prices tend to revert to their mean over time.
 
 from typing import Any
 
+import math
+
 import polars as pl
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 from quant_trading_strategy_backtester.strategy_params import (
@@ -42,7 +44,8 @@ class MeanReversionStrategy(BaseStrategy):
 
         Generates a buy signal (1) when the price falls below the lower band,
         and generates a sell signal (-1) when the price rises above the upper
-        band. The strategy assumes mean reversion will occur.
+        band. Positions are held until the price crosses back through the
+        rolling mean.
 
         Args:
             data: A DataFrame containing the price data. Must have a 'Close'
@@ -58,19 +61,16 @@ class MeanReversionStrategy(BaseStrategy):
                 schema=[
                     ("Date", pl.Date),
                     ("Close", pl.Float64),
-                    ("short_mavg", pl.Float64),
-                    ("long_mavg", pl.Float64),
+                    ("mean", pl.Float64),
+                    ("std", pl.Float64),
+                    ("upper_band", pl.Float64),
+                    ("lower_band", pl.Float64),
                     ("signal", pl.Float64),
                     ("position_change", pl.Float64),
                 ]
             )
 
-        valid_band = (
-            pl.col("std").is_not_null()
-            & pl.col("std").is_finite()
-            & (pl.col("std") > 0)
-        )
-        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
+        indicators: pl.DataFrame = (  # type: ignore[invalid-assignment]
             data.select([pl.col("Date"), pl.col("Close")])
             .lazy()
             .with_columns(
@@ -99,22 +99,87 @@ class MeanReversionStrategy(BaseStrategy):
                     ),
                 ]
             )
-            .with_columns(
-                [
-                    # Buy signal.
-                    pl.when(valid_band & (pl.col("Close") < pl.col("lower_band")))
-                    .then(1.0)
-                    # Sell signal.
-                    .when(valid_band & (pl.col("Close") > pl.col("upper_band")))
-                    .then(-1.0)
-                    .otherwise(0.0)
-                    .alias("signal")
-                ]
-            )
-            .with_columns(
-                [pl.col("signal").diff().fill_null(0).alias("position_change")]
-            )
             .collect()
         )
+        signal_values = self._generate_stateful_signals(indicators)
+        position_changes = self._calculate_position_changes(signal_values)
+
+        return indicators.with_columns(
+            [
+                pl.Series("signal", signal_values, dtype=pl.Float64),
+                pl.Series(
+                    "position_change",
+                    position_changes,
+                    dtype=pl.Float64,
+                ),
+            ]
+        )
+
+    def _generate_stateful_signals(self, indicators: pl.DataFrame) -> list[float]:
+        """Generate mean-reversion signals using entry and exit state."""
+        signal = 0.0
+        signals: list[float] = []
+
+        for close, mean, std, upper_band, lower_band in indicators.select(
+            ["Close", "mean", "std", "upper_band", "lower_band"]
+        ).iter_rows():
+            if not self._has_valid_band(close, mean, std, upper_band, lower_band):
+                signal = 0.0
+            else:
+                close_value = float(close)
+                mean_value = float(mean)
+                upper_band_value = float(upper_band)
+                lower_band_value = float(lower_band)
+
+                if signal > 0:
+                    signal = 0.0 if close_value >= mean_value else 1.0
+                elif signal < 0:
+                    signal = 0.0 if close_value <= mean_value else -1.0
+                elif close_value < lower_band_value:
+                    signal = 1.0
+                elif close_value > upper_band_value:
+                    signal = -1.0
+
+            signals.append(signal)
 
         return signals
+
+    @staticmethod
+    def _has_valid_band(
+        close: Any,
+        mean: Any,
+        std: Any,
+        upper_band: Any,
+        lower_band: Any,
+    ) -> bool:
+        """Return whether the row has a tradable rolling band."""
+        return (
+            MeanReversionStrategy._is_finite_number(close)
+            and MeanReversionStrategy._is_finite_number(mean)
+            and MeanReversionStrategy._is_finite_number(std)
+            and MeanReversionStrategy._is_finite_number(upper_band)
+            and MeanReversionStrategy._is_finite_number(lower_band)
+            and float(std) > 0
+        )
+
+    @staticmethod
+    def _is_finite_number(value: Any) -> bool:
+        """Return whether a value can be interpreted as a finite number."""
+        if value is None:
+            return False
+
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _calculate_position_changes(signals: list[float]) -> list[float]:
+        """Calculate signal changes from a flat starting position."""
+        previous_signal = 0.0
+        position_changes = []
+        for signal in signals:
+            position_changes.append(signal - previous_signal)
+            previous_signal = signal
+
+        return position_changes
