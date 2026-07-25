@@ -72,7 +72,10 @@ def load_yfinance_data_two_tickers(
         return _empty_two_ticker_data()
 
     if not isinstance(data.columns, pd.MultiIndex):
-        raise ValueError("Expected MultiIndex columns for two-ticker yfinance data")
+        # Treat malformed provider data as an invalid response value.
+        raise ValueError(  # noqa: TRY004
+            "Expected MultiIndex columns for two-ticker yfinance data"
+        )
 
     close_1 = _select_close_series(data, ticker1)
     close_2 = _select_close_series(data, ticker2)
@@ -210,8 +213,8 @@ def get_full_company_name(ticker: str) -> str | None:
     try:
         company_info = yf.Ticker(ticker).info
         return company_info.get("longName", ticker)
-    except Exception as e:
-        logger.error(f"Failed to fetch company name for {ticker}: {e}")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Failed to fetch company name for {ticker}: {exc}")
         return None
 
 
@@ -231,6 +234,6 @@ def is_same_company(ticker1: str, ticker2: str) -> bool:
         company1 = yf.Ticker(ticker1).info.get("longName", "").lower()
         company2 = yf.Ticker(ticker2).info.get("longName", "").lower()
         return company1 == company2 and company1 != "" and company2 != ""
-    except Exception as e:
-        logger.error(f"Error comparing {ticker1} and {ticker2}: {e}")
+    except Exception as exc:  # noqa: BLE001
+        logger.error(f"Error comparing {ticker1} and {ticker2}: {exc}")
         return False

@@ -79,8 +79,8 @@ def download_pair_data(ticker1: str, ticker2: str) -> pl.DataFrame | None:
         close_data.columns = ["Date", "Close_1", "Close_2"]
         result = pl.from_pandas(close_data).drop_nulls()
         return result if not result.is_empty() else None
-    except Exception as e:
-        print(f"  Failed to download {ticker1}/{ticker2}: {e}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Failed to download {ticker1}/{ticker2}: {exc}")
         return None
 
 
