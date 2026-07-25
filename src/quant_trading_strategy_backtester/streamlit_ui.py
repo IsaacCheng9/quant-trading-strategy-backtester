@@ -32,8 +32,7 @@ def get_user_inputs_except_strategy_params() -> tuple[
     # Two ticker strategies
     if strategy_type == "Pairs Trading":
         auto_select_tickers = st.sidebar.checkbox(
-            f"Optimise Ticker Pair From Top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
-            "Companies"
+            f"Explore Current Top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 Pairs"
         )
         if auto_select_tickers:
             ticker = None  # We'll select tickers later
@@ -52,7 +51,7 @@ def get_user_inputs_except_strategy_params() -> tuple[
         "Moving Average Crossover",
     ]:
         auto_select_tickers = st.sidebar.checkbox(
-            f"Optimise Ticker From Top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 Companies"
+            f"Explore Current Top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 Companies"
         )
         if auto_select_tickers:
             ticker = None  # We'll select the ticker later
