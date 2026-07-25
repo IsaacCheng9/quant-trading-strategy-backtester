@@ -498,6 +498,27 @@ def test_backtester_reports_downside_and_drawdown_risk_metrics() -> None:
     assert metrics["Max Drawdown Duration"] == 2
 
 
+def test_drawdown_includes_initial_capital_baseline() -> None:
+    """Verify that entry costs create drawdown from initial capital."""
+    dates = [datetime.date(2020, 1, day) for day in range(1, 4)]
+    data = pl.DataFrame({"Date": dates, "Close": [100.0] * 3})
+    backtester = Backtester(
+        data,
+        BuyAndHoldStrategy({}),
+        initial_capital=100_000.0,
+        transaction_cost_bps=500.0,
+        slippage_bps=0.0,
+    )
+
+    backtester.run()
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    assert metrics["Total Return"] == pytest.approx(-0.05)
+    assert metrics["Max Drawdown"] == pytest.approx(-0.05)
+    assert metrics["Max Drawdown Duration"] == 3
+
+
 def test_default_transaction_costs_reduce_returns():
     """
     Verify that the default transaction costs (5bps each) produce

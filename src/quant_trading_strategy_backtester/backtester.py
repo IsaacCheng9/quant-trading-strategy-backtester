@@ -554,9 +554,9 @@ class Backtester:
         sortino_ratio = _calculate_sortino_ratio(excess_returns)
 
         # Measure the maximum loss from a peak to a trough of the equity curve.
-        drawdowns = (
-            self.results["equity_curve"] / self.results["equity_curve"].cum_max() - 1
-        )
+        equity_curve = self.results["equity_curve"].cast(pl.Float64)
+        running_peak = equity_curve.cum_max().clip(lower_bound=self.initial_capital)
+        drawdowns = equity_curve / running_peak - 1
         max_drawdown = float(drawdowns.cast(pl.Float64).min())  # type: ignore
         max_drawdown_duration = _calculate_max_drawdown_duration(
             drawdowns.cast(pl.Float64)
