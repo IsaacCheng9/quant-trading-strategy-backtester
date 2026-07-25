@@ -14,8 +14,8 @@ def test_get_benchmark_date_range_uses_exclusive_yahoo_end_date() -> None:
     data = pl.DataFrame(
         {
             "Date": [
-                datetime.datetime(2020, 1, 2, 0, 0),
-                datetime.datetime(2020, 1, 3, 0, 0),
+                datetime.datetime(2020, 1, 2, 0, 0, tzinfo=datetime.UTC),
+                datetime.datetime(2020, 1, 3, 0, 0, tzinfo=datetime.UTC),
             ],
             "Close": [100.0, 101.0],
         }
