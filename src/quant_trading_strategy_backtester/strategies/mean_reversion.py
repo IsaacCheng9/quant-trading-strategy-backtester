@@ -3,9 +3,8 @@ Implements the mean reversion strategy, which is based on the assumption
 that asset prices tend to revert to their mean over time.
 """
 
-from typing import Any
-
 import math
+from typing import Any
 
 import polars as pl
 
