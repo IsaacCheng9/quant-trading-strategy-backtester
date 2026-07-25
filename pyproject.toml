@@ -43,8 +43,13 @@ dev = [
 app = "uv run streamlit run src/quant_trading_strategy_backtester/app.py"
 
 [tool.commitizen]
+name = "cz_customize"
 version = "0.8.1"
 version_files = [
     "pyproject.toml:version",
     "pyproject.toml:tool.commitizen.version",
 ]
+
+[tool.commitizen.customize]
+bump_pattern = "^((BREAKING[\\- ]CHANGE|\\w+)(\\(.+\\))?!?):"
+bump_map = { "^.+!$" = "MAJOR", "^BREAKING[\\- ]CHANGE" = "MAJOR", "^feat" = "MINOR", "^fix" = "PATCH", "^refactor" = "PATCH", "^perf" = "PATCH", "^build" = "PATCH", "^ci" = "PATCH", "^docs" = "PATCH", "^style" = "PATCH", "^test" = "PATCH", "^chore" = "PATCH" }

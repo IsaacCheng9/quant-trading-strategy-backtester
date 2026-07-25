@@ -37,8 +37,17 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          # Run commitizen bump (updates files only, no commit)
-          cz bump --yes --files-only
+          # Run commitizen bump (updates files only, no commit).
+          # Exit code 21 means no bump-worthy commits - exit
+          # gracefully as a safety net for unmapped prefixes.
+          cz bump --yes --files-only || {
+            rc=$?
+            if [ "$rc" -eq 21 ]; then
+              echo "No bump-worthy commits found, skipping."
+              exit 0
+            fi
+            exit "$rc"
+          }
 
           # Update lockfile to match new version
           uv lock
