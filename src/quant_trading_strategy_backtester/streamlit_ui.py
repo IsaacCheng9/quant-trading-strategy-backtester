@@ -171,6 +171,7 @@ def get_fixed_params(strategy_type: str) -> dict[str, Any]:
 
 def get_user_inputs_for_strategy_params(
     strategy_type: str,
+    auto_select_tickers: bool = False,
 ) -> tuple[bool, bool, dict[str, float] | dict[str, range] | dict[str, list[float]]]:
     """
     Gets user inputs for the strategy parameters from the Streamlit sidebar
@@ -178,9 +179,11 @@ def get_user_inputs_for_strategy_params(
 
     Args:
         strategy_type: The type of strategy selected by the user.
+        auto_select_tickers: Whether the app will select tickers automatically.
 
     Returns:
-        A tuple containing a boolean indicating whether to optimise, and a dictionary of strategy parameters.
+        Whether to optimise, whether to use walk-forward validation, and the
+        strategy parameters.
     """
     if strategy_type == "Buy and Hold":
         return False, False, {}  # No parameters for Buy and Hold strategy
@@ -193,11 +196,17 @@ def get_user_inputs_for_strategy_params(
         walk_forward = st.sidebar.checkbox(
             "Use Walk-Forward Validation",
             help=(
-                "Split data into multiple folds and optimise on "
-                "each training window, then evaluate out-of-sample."
-                " Shows parameter stability over time. Without this,"
-                " optimisation uses a single 70/30 train/test split."
+                "Unavailable with automatic ticker selection because its "
+                "selection window overlaps early walk-forward test folds."
+                if auto_select_tickers
+                else (
+                    "Split data into multiple folds and optimise on "
+                    "each training window, then evaluate out-of-sample."
+                    " Shows parameter stability over time. Without this,"
+                    " optimisation uses a single 70/30 train/test split."
+                )
             ),
+            disabled=auto_select_tickers,
         )
     else:
         params = get_fixed_params(strategy_type)
