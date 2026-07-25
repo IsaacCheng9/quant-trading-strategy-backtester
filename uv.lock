@@ -2,6 +2,14 @@ version = 1
 revision = 3
 requires-python = "==3.13.*"
 
+[manifest]
+constraints = [
+    { name = "gitpython", specifier = ">=3.1.55" },
+    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "soupsieve", specifier = ">=2.8.4" },
+    { name = "starlette", specifier = ">=1.3.1" },
+]
+
 [[package]]
 name = "altair"
 version = "6.0.0"
