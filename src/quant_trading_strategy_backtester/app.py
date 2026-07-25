@@ -33,6 +33,7 @@ from quant_trading_strategy_backtester.data import (
 from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
     create_strategy,
+    evaluate_validation_period,
     get_training_data,
     get_validation_data,
     optimise_buy_and_hold_ticker,
@@ -74,6 +75,24 @@ def _cached_run_backtest(
     return run_backtest(data, strategy_type, strategy_params, tickers)
 
 
+@st.cache_data
+def _cached_evaluate_validation_period(
+    context_data: pl.DataFrame,
+    validation_data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+) -> tuple[pl.DataFrame, dict[str, float]]:
+    """Cache context-aware validation evaluation across Streamlit reruns."""
+    return evaluate_validation_period(
+        context_data,
+        validation_data,
+        strategy_type,
+        strategy_params,
+        tickers,
+    )
+
+
 def _get_final_backtest_data(
     data: pl.DataFrame, use_validation_data: bool, walk_forward: bool
 ) -> pl.DataFrame:
@@ -113,77 +132,6 @@ def _get_final_backtest_data(
             f"on {len(training_data)} training rows."
         )
     return validation_data
-
-
-def _get_final_backtest_results(
-    results: pl.DataFrame,
-    final_backtest_data: pl.DataFrame,
-    use_validation_data: bool,
-    initial_capital: float = 100000.0,
-) -> pl.DataFrame:
-    """
-    Return final results while preserving rolling context for validation.
-
-    Args:
-        results: Backtest results calculated over the full context data.
-        final_backtest_data: Rows to display and score.
-        use_validation_data: Whether final results should be limited to
-            validation rows.
-        initial_capital: Capital used to reset the displayed equity curve.
-
-    Returns:
-        Full results for plain backtests, or validation-period rows with
-        cumulative columns reset to the validation start.
-    """
-    if not use_validation_data:
-        return results
-
-    if final_backtest_data.is_empty():
-        return results.head(0)
-
-    validation_dates = final_backtest_data.select(pl.col("Date").unique())
-    final_results = results.join(validation_dates, on="Date", how="inner")
-    return _reset_cumulative_result_columns(final_results, initial_capital)
-
-
-def _reset_cumulative_result_columns(
-    results: pl.DataFrame, initial_capital: float
-) -> pl.DataFrame:
-    """Reset cumulative returns and costs from the first displayed row."""
-    if results.is_empty():
-        return results
-
-    return results.with_columns(
-        [
-            (1 + pl.col("gross_strategy_returns"))
-            .cum_prod()
-            .alias("gross_cumulative_returns"),
-            (1 + pl.col("strategy_returns")).cum_prod().alias("cumulative_returns"),
-            (initial_capital * (1 + pl.col("strategy_returns")).cum_prod()).alias(
-                "equity_curve"
-            ),
-            pl.col("transaction_costs").cum_sum().alias("cumulative_transaction_costs"),
-        ]
-    )
-
-
-def _get_performance_metrics_for_results(
-    data: pl.DataFrame,
-    strategy_type: str,
-    strategy_params: dict[str, Any],
-    tickers: str | list[str],
-    results: pl.DataFrame,
-) -> dict[str, float]:
-    """Return performance metrics for an already-calculated result set."""
-    strategy = create_strategy(strategy_type, strategy_params)
-    backtester = Backtester(data, strategy, tickers=tickers)
-    backtester.results = results
-    metrics = backtester.get_performance_metrics()
-    assert metrics is not None, (
-        "No results available for the selected ticker and date range"
-    )
-
-    return metrics
 
 
 def _display_cointegration_result(data: pl.DataFrame, context: str) -> None:
@@ -852,16 +800,21 @@ def main():
         st.write("No validation data available for the selected ticker and date range")
         return
 
-    context_data = data if use_validation_data else backtest_data
-    context_results, _ = _cached_run_backtest(
-        context_data, strategy_type, strategy_params, tickers
-    )
-    results = _get_final_backtest_results(
-        context_results, backtest_data, use_validation_data
-    )
-    metrics = _get_performance_metrics_for_results(
-        backtest_data, strategy_type, strategy_params, tickers, results
-    )
+    if use_validation_data:
+        results, metrics = _cached_evaluate_validation_period(
+            data,
+            backtest_data,
+            strategy_type,
+            strategy_params,
+            tickers,
+        )
+    else:
+        results, metrics = _cached_run_backtest(
+            backtest_data,
+            strategy_type,
+            strategy_params,
+            tickers,
+        )
 
     # Save only the final backtest result, and only once per unique
     # combination of inputs (not on every Streamlit rerun).
