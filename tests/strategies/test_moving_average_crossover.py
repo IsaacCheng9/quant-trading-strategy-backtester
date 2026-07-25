@@ -6,6 +6,7 @@ from datetime import date, timedelta
 
 import polars as pl
 import pytest
+
 from quant_trading_strategy_backtester.strategies.moving_average_crossover import (
     MovingAverageCrossoverStrategy,
 )

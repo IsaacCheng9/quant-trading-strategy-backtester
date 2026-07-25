@@ -10,14 +10,13 @@ this repository.
 import json
 import math
 import platform
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 import polars as pl
 import streamlit as st
 
-from quant_trading_strategy_backtester.models import Session
-from quant_trading_strategy_backtester.models import StrategyModel as StrategyModel
+from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 TRADING_DAYS_PER_YEAR = 252
@@ -640,9 +639,9 @@ class Backtester:
                     print(
                         f"Strategy {strategy_name} with same parameters already exists. Skipping save."
                     )
-            except Exception as e:
+            except Exception as exc:
                 self.session.rollback()
-                raise ValueError(f"Failed to save strategy results: {str(e)}")
+                raise ValueError(f"Failed to save strategy results: {exc!s}") from exc
         else:
             # Use Streamlit session state for cloud deployment
             if "strategy_results" not in st.session_state:
@@ -650,7 +649,7 @@ class Backtester:
 
             st.session_state.strategy_results.append(
                 {
-                    "date_created": datetime.now(),
+                    "date_created": datetime.now(UTC),
                     "name": strategy_name,
                     "parameters": strategy_params,
                     "total_return": metrics["Total Return"],
