@@ -643,6 +643,41 @@ def test_pairs_costs_use_leg_weight_changes():
     assert results["position_change"].to_list() == [0.0, 1.0, 0.0, 0.0]
 
 
+def test_pairs_returns_are_invariant_to_second_leg_price_scale() -> None:
+    """Verify that quotation scale does not change pair returns or costs."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(80)]
+    close_2 = [100.0 + i for i in range(80)]
+    residuals = [0.0] * 80
+    for index in range(40, 50):
+        residuals[index] = 20.0
+    for index in range(60, 70):
+        residuals[index] = -20.0
+    close_1 = [10.0 + 2.0 * close_2[index] + residuals[index] for index in range(80)]
+    data = pl.DataFrame({"Date": dates, "Close_1": close_1, "Close_2": close_2})
+    scaled_data = data.with_columns((pl.col("Close_2") * 10.0).alias("Close_2"))
+    params = {"window": 10, "entry_z_score": 1.5, "exit_z_score": 0.5}
+
+    base_results = Backtester(data, PairsTradingStrategy(params)).run()
+    scaled_results = Backtester(
+        scaled_data,
+        PairsTradingStrategy(params),
+    ).run()
+
+    assert base_results["signal"].to_list() == scaled_results["signal"].to_list()
+    for column in [
+        "leg_1_weight",
+        "leg_2_weight",
+        "trade_turnover",
+        "gross_strategy_returns",
+        "transaction_costs",
+        "strategy_returns",
+        "cumulative_returns",
+    ]:
+        assert base_results[column].to_list() == pytest.approx(
+            scaled_results[column].to_list()
+        )
+
+
 def test_trade_ledger_records_single_asset_entries_and_exits():
     """
     Verify that the trade ledger captures entry, exit, costs, and holding time.
