@@ -196,23 +196,48 @@ class PairsTradingStrategy(BaseStrategy):
             .with_columns(
                 [pl.col("signal").forward_fill().fill_null(0).alias("signal")]
             )
-            # Convert spread direction into normalised long/short leg weights.
+            # Convert hedge quantities into gross-dollar portfolio weights.
             .with_columns(
                 [
-                    (1.0 + pl.col("hedge_ratio").abs()).alias("gross_exposure"),
+                    pl.col("Close_1").abs().alias("leg_1_notional"),
+                    (pl.col("hedge_ratio") * pl.col("Close_2"))
+                    .abs()
+                    .alias("leg_2_notional"),
                 ]
             )
             .with_columns(
                 [
-                    pl.when(hedge_ratio_is_valid & (pl.col("signal") != 0))
-                    .then(pl.col("signal") / pl.col("gross_exposure"))
+                    (pl.col("leg_1_notional") + pl.col("leg_2_notional")).alias(
+                        "gross_notional"
+                    )
+                ]
+            )
+            .with_columns(
+                [
+                    pl.when(
+                        hedge_ratio_is_valid
+                        & pl.col("gross_notional").is_finite()
+                        & (pl.col("gross_notional") > 0)
+                        & (pl.col("signal") != 0)
+                    )
+                    .then(
+                        pl.col("signal")
+                        * pl.col("leg_1_notional")
+                        / pl.col("gross_notional")
+                    )
                     .otherwise(0.0)
                     .alias("leg_1_weight"),
-                    pl.when(hedge_ratio_is_valid & (pl.col("signal") != 0))
+                    pl.when(
+                        hedge_ratio_is_valid
+                        & pl.col("gross_notional").is_finite()
+                        & (pl.col("gross_notional") > 0)
+                        & (pl.col("signal") != 0)
+                    )
                     .then(
                         -pl.col("signal")
                         * pl.col("hedge_ratio")
-                        / pl.col("gross_exposure")
+                        * pl.col("Close_2")
+                        / pl.col("gross_notional")
                     )
                     .otherwise(0.0)
                     .alias("leg_2_weight"),
@@ -232,7 +257,15 @@ class PairsTradingStrategy(BaseStrategy):
                     .alias("leg_2_weight_change"),
                 ]
             )
-            .drop(["close_2_variance", "close_covariance", "gross_exposure"])
+            .drop(
+                [
+                    "close_2_variance",
+                    "close_covariance",
+                    "leg_1_notional",
+                    "leg_2_notional",
+                    "gross_notional",
+                ]
+            )
             .with_columns(
                 [
                     pl.col("signal").cast(pl.Float64),
