@@ -284,6 +284,15 @@ def _display_benchmark_comparison(
 # Trading strategy preparation functions
 
 
+def _validate_automatic_selection_mode(walk_forward: bool) -> None:
+    """Reject walk-forward reporting after automatic ticker selection."""
+    if walk_forward:
+        raise ValueError(
+            "Walk-forward validation cannot be combined with automatic ticker "
+            "selection because the selection window overlaps early test folds"
+        )
+
+
 def prepare_buy_and_hold_strategy_with_optimisation(
     start_date: datetime.date,
     end_date: datetime.date,
@@ -362,6 +371,8 @@ def prepare_single_ticker_strategy_with_optimisation(
             - The selected ticker symbol.
             - Optimised strategy parameters.
     """
+    _validate_automatic_selection_mode(walk_forward)
+
     st.info(
         f"Selecting the best ticker from the top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
         "companies. This may take a while..."
@@ -452,6 +463,8 @@ def prepare_pairs_trading_strategy_with_optimisation(
             - A string representation of the selected pair.
             - Optimised strategy parameters.
     """
+    _validate_automatic_selection_mode(walk_forward)
+
     # Inform the user that the optimisation process is starting
     st.info(
         f"Selecting the best pair from the top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
@@ -741,7 +754,8 @@ def main():
         get_user_inputs_except_strategy_params()
     )
     optimise, walk_forward, strategy_params = get_user_inputs_for_strategy_params(
-        strategy_type
+        strategy_type,
+        auto_select_tickers,
     )
 
     # Initialise company names
