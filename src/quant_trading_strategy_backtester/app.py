@@ -293,6 +293,16 @@ def _validate_automatic_selection_mode(walk_forward: bool) -> None:
         )
 
 
+def _display_current_universe_warning() -> None:
+    """Warn that automatic selection does not use point-in-time universes."""
+    st.warning(
+        "Exploratory selection only: candidates use today's S&P 500 "
+        "constituents and current market caps. Historical results therefore "
+        "contain survivorship and future-information bias and are not "
+        "point-in-time evidence."
+    )
+
+
 def prepare_buy_and_hold_strategy_with_optimisation(
     start_date: datetime.date,
     end_date: datetime.date,
@@ -312,9 +322,10 @@ def prepare_buy_and_hold_strategy_with_optimisation(
             - The selected ticker symbol.
             - An empty dictionary (no strategy parameters for Buy and Hold).
     """
+    _display_current_universe_warning()
     st.info(
-        f"Selecting the best ticker from the top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
-        "companies. This may take a while..."
+        f"Ranking today's top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
+        "constituents. This may take a while..."
     )
 
     start_time = time.time()
@@ -333,9 +344,8 @@ def prepare_buy_and_hold_strategy_with_optimisation(
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
 
-    # Display the optimal ticker
-    st.header("Optimal Ticker")
-    st.write(f"Best performing ticker: {best_ticker}")
+    st.header("Exploratory Current-Universe Result")
+    st.write(f"Selected ticker: {best_ticker}")
 
     # Load historical data for the selected ticker
     data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
@@ -372,10 +382,10 @@ def prepare_single_ticker_strategy_with_optimisation(
             - Optimised strategy parameters.
     """
     _validate_automatic_selection_mode(walk_forward)
-
+    _display_current_universe_warning()
     st.info(
-        f"Selecting the best ticker from the top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
-        "companies. This may take a while..."
+        f"Ranking today's top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 "
+        "constituents. This may take a while..."
     )
 
     start_time = time.time()
@@ -421,8 +431,7 @@ def prepare_single_ticker_strategy_with_optimisation(
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
 
-    # Display the optimal ticker and parameters (if optimised)
-    st.header("Optimal Ticker and Parameters")
+    st.header("Exploratory Current-Universe Result")
     if optimise:
         result = {
             "ticker": best_ticker,
@@ -464,11 +473,11 @@ def prepare_pairs_trading_strategy_with_optimisation(
             - Optimised strategy parameters.
     """
     _validate_automatic_selection_mode(walk_forward)
-
+    _display_current_universe_warning()
     # Inform the user that the optimisation process is starting
     st.info(
-        f"Selecting the best pair from the top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
-        "companies. This may take a while..."
+        f"Ranking pairs from today's top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
+        "constituents. This may take a while..."
     )
 
     start_time = time.time()
@@ -519,8 +528,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
 
-    # Display the optimal tickers and parameters.
-    st.header("Optimal Tickers and Parameters")
+    st.header("Exploratory Current-Universe Result")
     tickers_and_strategy_params = {
         "ticker1": ticker1,
         "ticker2": ticker2,

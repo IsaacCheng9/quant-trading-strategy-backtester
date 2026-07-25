@@ -17,8 +17,8 @@ _Try the deployed app
   Crossover, and Pairs Trading
 - **Walk-forward validation** – parameter optimisation with expanding training
   windows to reduce overfitting
-- **Automatic strategy optimisation** – grid search over parameter combinations
-  and stock selection from S&P 500
+- **Exploratory current-universe selection** – grid search over parameter
+  combinations and today's largest S&P 500 constituents
 - **Transaction costs and slippage modelling** – configurable fees and slippage
   for realistic performance estimates
 - **Trade ledger and cost attribution** – explicit trade events, turnover,
@@ -44,9 +44,9 @@ _Try the deployed app
   exposure-normalised leg weights to calculate pair returns and transaction
   costs. Automatic pair selection first filters candidates using an
   Engle-Granger cointegration test on the training split
-- **Ticker/pair selection** uses a 70/30 train/test split – tickers are
-  selected on training data and evaluated on held-out test data to reduce
-  look-ahead bias
+- **Ticker/pair selection** uses a 70/30 train/test split – candidates are
+  ranked on training data and evaluated on held-out test data, but the candidate
+  universe itself is not point in time
 - **Benchmark comparison** aligns the strategy and SPY return streams by date
   over the displayed backtest period before calculating relative metrics
 - **Optimisation reporting** shows valid parameter combinations, candidate
@@ -54,9 +54,11 @@ _Try the deployed app
   held-out, or walk-forward evaluation
 - **Walk-forward validation** uses expanding training windows for more
   robust out-of-sample evaluation – recommended over the default split
-- **Survivorship bias** remains a limitation – automatic ticker selection uses
-  today's S&P 500 constituents, so historical results can still be biased
-  towards companies that survived to the current index
+- **Automatic selection is exploratory only** – it uses today's S&P 500
+  constituents and current market capitalisations for historical backtests
+	- This introduces survivorship bias and future-information leakage
+	- Held-out prices do not make these results point-in-time or research-grade
+	  out-of-sample evidence
 
 ## Screenshots
 
