@@ -85,6 +85,7 @@ def _require_number(params: Mapping[str, Any], name: str) -> int | float:
 
     value = params[name]
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"{name} must be numeric")
+        # Keep all strategy parameter validation under one public exception type.
+        raise ValueError(f"{name} must be numeric")  # noqa: TRY004
 
     return value

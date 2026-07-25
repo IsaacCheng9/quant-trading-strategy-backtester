@@ -5,6 +5,7 @@ Tests for the Buy and Hold strategy class.
 from datetime import date, timedelta
 
 import polars as pl
+
 from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
 
 

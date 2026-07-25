@@ -2,8 +2,8 @@
 Evaluate pair cointegration for pairs-trading selection and diagnostics.
 """
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import polars as pl

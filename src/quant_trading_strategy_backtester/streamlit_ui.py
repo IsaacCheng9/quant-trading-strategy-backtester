@@ -7,6 +7,7 @@ import datetime
 from typing import Any
 
 import streamlit as st
+
 from quant_trading_strategy_backtester.strategies.base import TRADING_STRATEGIES
 from quant_trading_strategy_backtester.utils import (
     NUM_TOP_COMPANIES_ONE_TICKER,

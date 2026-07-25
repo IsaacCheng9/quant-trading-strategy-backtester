@@ -4,10 +4,13 @@ Contains tests for the Backtester class and its methods.
 
 import datetime
 import math
+from itertools import pairwise
 from typing import Any
 
 import polars as pl
 import pytest
+from conftest import MockHoldingStrategy
+
 from quant_trading_strategy_backtester.backtester import (
     TRADING_DAYS_PER_YEAR,
     Backtester,
@@ -25,7 +28,6 @@ from quant_trading_strategy_backtester.strategies.moving_average_crossover impor
 from quant_trading_strategy_backtester.strategies.pairs_trading import (
     PairsTradingStrategy,
 )
-from conftest import MockHoldingStrategy
 
 
 class MockPairsWeightedStrategy(BaseStrategy):
@@ -61,9 +63,7 @@ class MockPairsWeightedStrategy(BaseStrategy):
 
 def _calculate_changes(values: list[float]) -> list[float]:
     """Return first differences while treating the first value as an entry."""
-    return [values[0]] + [
-        current - previous for previous, current in zip(values, values[1:])
-    ]
+    return [values[0]] + [current - previous for previous, current in pairwise(values)]
 
 
 @pytest.mark.parametrize(
@@ -680,9 +680,9 @@ def test_trade_ledger_normalises_datetime_dates():
     data = pl.DataFrame(
         {
             "Date": [
-                datetime.datetime(2020, 1, 1),
-                datetime.datetime(2020, 1, 2),
-                datetime.datetime(2020, 1, 3),
+                datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC),
+                datetime.datetime(2020, 1, 2, tzinfo=datetime.UTC),
+                datetime.datetime(2020, 1, 3, tzinfo=datetime.UTC),
             ],
             "Close": [100.0, 110.0, 121.0],
         }
