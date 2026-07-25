@@ -67,7 +67,7 @@ def visualise_benchmark_times(
                 marker_color="#FF4136",
                 text=[f"{t:.2f}s" for t in pandas_times],
                 textposition="outside",
-                textfont=dict(size=18),
+                textfont={"size": 18},
             ),
             go.Bar(
                 name="Polars",
@@ -76,14 +76,14 @@ def visualise_benchmark_times(
                 marker_color="#0074D9",
                 text=[f"{t:.2f}s" for t in polars_times],
                 textposition="outside",
-                textfont=dict(size=18),
+                textfont={"size": 18},
             ),
         ]
     )
     fig.update_layout(
         barmode="group",
-        title=dict(
-            text=(
+        title={
+            "text": (
                 f"pandas vs. Polars: Pairs Trading with"
                 f" Ticker-Pair and Parameter Optimisation"
                 f" ({benchmark_platform})<br>"
@@ -94,29 +94,29 @@ def visualise_benchmark_times(
                 f"Polars: {polars_mean:.2f}s"
                 f" (std {polars_std:.2f}s)</sub>"
             ),
-            font=dict(size=28),
-            y=0.95,
-            x=0.5,
-            xanchor="center",
-            yanchor="top",
-        ),
-        xaxis_title=dict(text="Run Number", font=dict(size=20)),
-        yaxis_title=dict(text="Execution Time (seconds)", font=dict(size=20)),
+            "font": {"size": 28},
+            "y": 0.95,
+            "x": 0.5,
+            "xanchor": "center",
+            "yanchor": "top",
+        },
+        xaxis_title={"text": "Run Number", "font": {"size": 20}},
+        yaxis_title={"text": "Execution Time (seconds)", "font": {"size": 20}},
         # Leave room above the tallest bar for text labels.
-        yaxis=dict(range=[0, max(pandas_times) * 1.15]),
-        margin=dict(t=130),
-        legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=0.99,
-            xanchor="right",
-            x=1,
-            font=dict(size=16),
-        ),
+        yaxis={"range": [0, max(pandas_times) * 1.15]},
+        margin={"t": 130},
+        legend={
+            "orientation": "h",
+            "yanchor": "top",
+            "y": 0.99,
+            "xanchor": "right",
+            "x": 1,
+            "font": {"size": 16},
+        },
         plot_bgcolor="white",
     )
-    fig.update_xaxes(showgrid=False, tickfont=dict(size=16))
-    fig.update_yaxes(gridcolor="#eee", tickfont=dict(size=16))
+    fig.update_xaxes(showgrid=False, tickfont={"size": 16})
+    fig.update_yaxes(gridcolor="#eee", tickfont={"size": 16})
 
     # Save the plot as an interactive HTML file.
     resources_dir = PROJECT_ROOT / "resources"

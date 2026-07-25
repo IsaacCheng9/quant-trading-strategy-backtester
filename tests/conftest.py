@@ -2,16 +2,16 @@
 Contains pytest fixtures for tests, such as mock data.
 """
 
+from typing import Any
+
 import pandas as pd
 import polars as pl
 import pytest
-from quant_trading_strategy_backtester.models import Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from quant_trading_strategy_backtester.models import Base
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
-
-from typing import Any
 
 
 class MockHoldingStrategy(BaseStrategy):

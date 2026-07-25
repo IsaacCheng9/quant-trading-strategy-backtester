@@ -8,6 +8,7 @@ from typing import Any
 
 import polars as pl
 import pytest
+
 from quant_trading_strategy_backtester.app import (
     _get_final_backtest_data,
     _get_final_backtest_results,
@@ -1150,7 +1151,7 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
         "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
     )
 
-    params, metrics = optimise_strategy_params(
+    _params, metrics = optimise_strategy_params(
         train_data,
         "Moving Average Crossover",
         {"short_window": [5], "long_window": [20]},

@@ -2,6 +2,11 @@
 Tests for the base strategy class.
 """
 
+from typing import Any
+
+import polars as pl
+import pytest
+
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 from quant_trading_strategy_backtester.strategies.mean_reversion import (
     MeanReversionStrategy,
@@ -12,13 +17,6 @@ from quant_trading_strategy_backtester.strategies.moving_average_crossover impor
 from quant_trading_strategy_backtester.strategies.pairs_trading import (
     PairsTradingStrategy,
 )
-
-
-import polars as pl
-import pytest
-
-
-from typing import Any
 
 
 @pytest.mark.parametrize(
