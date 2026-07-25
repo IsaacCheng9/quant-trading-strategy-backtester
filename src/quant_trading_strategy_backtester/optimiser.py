@@ -120,6 +120,85 @@ def get_training_data(
     return train_data
 
 
+def evaluate_validation_period(
+    context_data: pl.DataFrame,
+    validation_data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+    initial_capital: float = 100000.0,
+) -> tuple[pl.DataFrame, dict[str, float]]:
+    """Evaluate validation rows while preserving prior strategy state.
+
+    Run the strategy over all data available through the validation period,
+    retain only validation dates, and reset cumulative metrics at the
+    validation boundary.
+
+    Args:
+        context_data: Price data through the end of the validation period.
+        validation_data: Exact rows to score as out of sample.
+        strategy_type: The type of strategy to evaluate.
+        strategy_params: Scalar parameters for the selected strategy.
+        tickers: The ticker or tickers used in the backtest.
+        initial_capital: Capital used to reset the validation equity curve.
+
+    Returns:
+        Validation-period results and performance metrics.
+
+    Raises:
+        ValueError: If validation data is empty or produces no result rows.
+    """
+    if validation_data.is_empty():
+        raise ValueError("Validation data must not be empty")
+
+    context_results, _ = run_backtest(
+        context_data,
+        strategy_type,
+        strategy_params,
+        tickers,
+    )
+    validation_dates = validation_data.select(pl.col("Date").unique())
+    validation_results = context_results.join(validation_dates, on="Date", how="inner")
+    if validation_results.is_empty():
+        raise ValueError("Validation dates produced no backtest results")
+
+    validation_results = _reset_cumulative_result_columns(
+        validation_results,
+        initial_capital,
+    )
+    strategy = create_strategy(strategy_type, strategy_params)
+    backtester = Backtester(
+        validation_data,
+        strategy,
+        initial_capital=initial_capital,
+        tickers=tickers,
+    )
+    backtester.results = validation_results
+    metrics = backtester.get_performance_metrics()
+    if metrics is None:
+        raise ValueError("Validation period produced no performance metrics")
+
+    return validation_results, metrics
+
+
+def _reset_cumulative_result_columns(
+    results: pl.DataFrame, initial_capital: float
+) -> pl.DataFrame:
+    """Reset cumulative returns and costs from the first validation row."""
+    return results.with_columns(
+        [
+            (1 + pl.col("gross_strategy_returns"))
+            .cum_prod()
+            .alias("gross_cumulative_returns"),
+            (1 + pl.col("strategy_returns")).cum_prod().alias("cumulative_returns"),
+            (initial_capital * (1 + pl.col("strategy_returns")).cum_prod()).alias(
+                "equity_curve"
+            ),
+            pl.col("transaction_costs").cum_sum().alias("cumulative_transaction_costs"),
+        ]
+    )
+
+
 def _optimisation_score(
     metrics: dict[str, float], metric_name: str = "Sharpe Ratio"
 ) -> float | None:
@@ -478,7 +557,14 @@ def optimise_strategy_params(
 
     # Evaluate best params on held-out test data if provided.
     if test_data is not None:
-        _, test_metrics = run_backtest(test_data, strategy_type, best_params, tickers)
+        context_data = pl.concat([data, test_data], how="vertical")
+        _, test_metrics = evaluate_validation_period(
+            context_data,
+            test_data,
+            strategy_type,
+            best_params,
+            tickers,
+        )
         return best_params, test_metrics
 
     return best_params, best_metrics
@@ -515,6 +601,7 @@ def optimise_pairs_trading_tickers(
     """
     best_pair = None
     best_params = None
+    best_context_data = None
     best_test_data = None
     best_sharpe_ratio = float("-inf")
     evaluated_pairs = 0
@@ -583,6 +670,7 @@ def optimise_pairs_trading_tickers(
             best_sharpe_ratio = score
             best_pair = (ticker1, ticker2)
             best_params = current_params
+            best_context_data = data
             best_test_data = test_data
 
         end_time = time.time()
@@ -590,7 +678,12 @@ def optimise_pairs_trading_tickers(
 
     progress_bar.empty()
     status_text.empty()
-    if not best_pair or not best_params or best_test_data is None:
+    if (
+        not best_pair
+        or not best_params
+        or best_context_data is None
+        or best_test_data is None
+    ):
         raise ValueError(
             "Pairs trading optimisation failed: no cointegrated pair produced "
             f"a finite Sharpe ratio ({rejected_pairs} pairs rejected by "
@@ -612,8 +705,12 @@ def optimise_pairs_trading_tickers(
             "backtests)."
         )
 
-    _, best_metrics = run_backtest(
-        best_test_data, "Pairs Trading", best_params, list(best_pair)
+    _, best_metrics = evaluate_validation_period(
+        best_context_data,
+        best_test_data,
+        "Pairs Trading",
+        best_params,
+        list(best_pair),
     )
 
     return best_pair, best_params, best_metrics
@@ -683,8 +780,14 @@ def walk_forward_optimise(
         if best_params is None:
             raise ValueError(f"Walk-forward optimisation failed on fold {fold + 1}")
 
-        # Evaluate best params on out-of-sample test data.
-        _, oos_metrics = run_backtest(test_data, strategy_type, best_params, tickers)
+        # Evaluate out of sample without cold-starting rolling strategy state.
+        _, oos_metrics = evaluate_validation_period(
+            data[:test_end],
+            test_data,
+            strategy_type,
+            best_params,
+            tickers,
+        )
 
         fold_results.append(
             {

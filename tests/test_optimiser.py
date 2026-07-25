@@ -11,7 +11,6 @@ import pytest
 
 from quant_trading_strategy_backtester.app import (
     _get_final_backtest_data,
-    _get_final_backtest_results,
     prepare_buy_and_hold_strategy_with_optimisation,
     prepare_pairs_trading_strategy_with_optimisation,
     prepare_single_ticker_strategy_with_optimisation,
@@ -21,6 +20,7 @@ from quant_trading_strategy_backtester.optimiser import (
     _split_data,
     count_candidate_pairs,
     count_valid_parameter_combinations,
+    evaluate_validation_period,
     get_training_data,
     get_validation_data,
     optimise_buy_and_hold_ticker,
@@ -216,7 +216,11 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
     # Mock data and functions
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
     mock_polars_data = pl.DataFrame(
-        {"Close_1": [100, 101, 102], "Close_2": [200, 202, 204]}
+        {
+            "Date": [datetime.date(2020, 1, day) for day in range(1, 4)],
+            "Close_1": [100, 101, 102],
+            "Close_2": [200, 202, 204],
+        }
     )
 
     def mock_load_data(*args, **kwargs):
@@ -252,6 +256,10 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
         lambda *_args, **_kwargs: _cointegration_result(True),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        lambda *_args, **_kwargs: (pl.DataFrame(), {"Sharpe Ratio": 1.5}),
     )
 
     start_date = datetime.date(2020, 1, 1)
@@ -314,11 +322,25 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
 
     def mock_run_backtest(data, strategy_type, params, tickers):
         pair = tuple(tickers)
-        scores = train_scores if len(data) == 7 else test_scores
         return None, {
-            "Sharpe Ratio": scores[pair],
+            "Sharpe Ratio": train_scores[pair],
             "Total Return": 0.1,
             "Max Drawdown": -0.05,
+        }
+
+    def mock_evaluate_validation_period(
+        context_data,
+        validation_data,
+        strategy_type,
+        params,
+        tickers,
+    ):
+        assert len(context_data) == 10
+        assert len(validation_data) == 3
+        return pl.DataFrame(), {
+            "Sharpe Ratio": test_scores[tuple(tickers)],
+            "Total Return": 0.01,
+            "Max Drawdown": -0.02,
         }
 
     monkeypatch.setattr(
@@ -335,6 +357,10 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
         lambda *_args, **_kwargs: _cointegration_result(True),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        mock_evaluate_validation_period,
     )
 
     best_pair, best_params, metrics = optimise_pairs_trading_tickers(
@@ -397,9 +423,16 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
             "Max Drawdown": -0.05,
         }
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
-        assert len(data) == 3
-        return None, {
+    def mock_evaluate_validation_period(
+        context_data,
+        validation_data,
+        strategy_type,
+        params,
+        tickers,
+    ):
+        assert len(context_data) == 10
+        assert len(validation_data) == 3
+        return pl.DataFrame(), {
             "Sharpe Ratio": -1.0,
             "Total Return": 0.01,
             "Max Drawdown": -0.02,
@@ -418,7 +451,8 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
         mock_optimise_strategy_params,
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        mock_evaluate_validation_period,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
@@ -477,6 +511,20 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
             "Max Drawdown": -0.05,
         }
 
+    def mock_evaluate_validation_period(
+        context_data,
+        validation_data,
+        strategy_type,
+        params,
+        tickers,
+    ):
+        pair = tuple(tickers)
+        return pl.DataFrame(), {
+            "Sharpe Ratio": train_scores[pair],
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
         mock_load_data,
@@ -491,6 +539,10 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        mock_evaluate_validation_period,
     )
 
     best_pair, _, metrics = optimise_pairs_trading_tickers(
@@ -1071,47 +1123,50 @@ def test_get_final_backtest_data_uses_validation_split():
     assert len(full_data) == 100
 
 
-def test_get_final_backtest_results_preserves_context_and_resets_returns():
-    """Verify validation display uses contextual results but validation returns."""
-    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
-    context_results = pl.DataFrame(
+def test_evaluate_validation_period_preserves_rolling_context() -> None:
+    """Verify validation evaluation carries rolling state across its boundary."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(12)]
+    data = pl.DataFrame(
         {
             "Date": dates,
-            "signal": [0.0, 0.0, 1.0, 1.0, 1.0, 0.0, -1.0, -1.0, 0.0, 0.0],
-            "position_change": [0.0, 0.0, 1.0, 0.0, 0.0, -1.0, -1.0, 0.0, 1.0, 0.0],
-            "gross_strategy_returns": [0.1] * 10,
-            "transaction_costs": [0.01] * 10,
-            "strategy_returns": [0.09] * 10,
-            "trade_turnover": [0.0] * 10,
-            "cumulative_transaction_costs": [0.01 * (i + 1) for i in range(10)],
-            "gross_cumulative_returns": [99.0] * 10,
-            "cumulative_returns": [99.0] * 10,
-            "equity_curve": [9_999_999.0] * 10,
+            "Close": [100.0 + i for i in range(12)],
         }
     )
-    validation_data = pl.DataFrame({"Date": dates[7:]})
+    validation_data = data[8:]
+    params = {"short_window": 2, "long_window": 3}
 
-    final_results = _get_final_backtest_results(
-        context_results,
+    contextual_results, contextual_metrics = evaluate_validation_period(
+        data,
         validation_data,
-        use_validation_data=True,
-        initial_capital=100_000.0,
+        "Moving Average Crossover",
+        params,
+        "TEST",
+    )
+    isolated_results, isolated_metrics = run_backtest(
+        validation_data,
+        "Moving Average Crossover",
+        params,
+        "TEST",
     )
 
-    assert final_results["Date"].to_list() == dates[7:]
-    assert final_results["signal"].to_list() == [-1.0, 0.0, 0.0]
-    assert final_results["cumulative_returns"].to_list() == pytest.approx(
-        [1.09, 1.1881, 1.295029]
+    assert contextual_results["Date"].to_list() == dates[8:]
+    assert contextual_results["signal"].to_list() == [1.0] * 4
+    assert contextual_results["position_change"].to_list() == [0.0] * 4
+    assert contextual_results["cumulative_returns"][0] == pytest.approx(1.0 + 1 / 107)
+    expected_cumulative_returns = (
+        1 + contextual_results["strategy_returns"]
+    ).cum_prod()
+    assert contextual_results["cumulative_returns"].to_list() == pytest.approx(
+        expected_cumulative_returns.to_list()
     )
-    assert final_results["gross_cumulative_returns"].to_list() == pytest.approx(
-        [1.1, 1.21, 1.331]
+    assert contextual_results["equity_curve"].to_list() == pytest.approx(
+        (100_000 * expected_cumulative_returns).to_list()
     )
-    assert final_results["cumulative_transaction_costs"].to_list() == pytest.approx(
-        [0.01, 0.02, 0.03]
+    assert contextual_results["cumulative_transaction_costs"].to_list() == (
+        contextual_results["transaction_costs"].cum_sum().to_list()
     )
-    assert final_results["equity_curve"].to_list() == pytest.approx(
-        [109_000.0, 118_810.0, 129_502.9]
-    )
+    assert contextual_metrics["Total Return"] > isolated_metrics["Total Return"]
+    assert isolated_results["signal"].to_list()[:2] == [0.0, 0.0]
 
 
 def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
@@ -1133,22 +1188,32 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
 
     def mock_run_backtest(data, strategy_type, params, tickers):
         call_log.append(("backtest", len(data)))
-        # Return different metrics for train vs test
-        if len(data) == 21:
-            return None, {
-                "Sharpe Ratio": 1.0,
-                "Total Return": 0.1,
-                "Max Drawdown": -0.05,
-            }
-        else:
-            return None, {
-                "Sharpe Ratio": 0.5,
-                "Total Return": 0.05,
-                "Max Drawdown": -0.03,
-            }
+        return None, {
+            "Sharpe Ratio": 1.0,
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    def mock_evaluate_validation_period(
+        context_data,
+        validation_data,
+        strategy_type,
+        params,
+        tickers,
+    ):
+        call_log.append(("validation", len(context_data), len(validation_data)))
+        return pl.DataFrame(), {
+            "Sharpe Ratio": 0.5,
+            "Total Return": 0.05,
+            "Max Drawdown": -0.03,
+        }
 
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        mock_evaluate_validation_period,
     )
 
     _params, metrics = optimise_strategy_params(
@@ -1160,10 +1225,10 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
     )
 
     # Should have run backtests for each param combo on train + once on test
-    assert len(call_log) == 2  # 1 train combo + 1 test eval
-    assert call_log[0] == ("backtest", 21)  # train
-    assert call_log[1] == ("backtest", 10)  # test
-    # Metrics should be from test data
+    assert call_log == [
+        ("backtest", 21),
+        ("validation", 31, 10),
+    ]
     assert metrics["Sharpe Ratio"] == 0.5
     assert metrics["Total Return"] == 0.05
 
