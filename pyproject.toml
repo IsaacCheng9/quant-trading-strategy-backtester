@@ -36,7 +36,7 @@ dev = [
     "coverage<8.0.0,>=7.6.0",
     "pandas-stubs<3.0.0.0,>=2.2.2.240603",
     "pytest-cov<6.0.0,>=5.0.0",
-    "ty>=0.0.21",
+    "pyrefly>=1.2.0",
 ]
 
 [tool.uv]
@@ -49,6 +49,11 @@ constraint-dependencies = [
 
 [tool.poe.tasks]
 app = "uv run streamlit run src/quant_trading_strategy_backtester/app.py"
+
+[tool.pyrefly]
+project-includes = ["src", "tests", "scripts"]
+search-path = ["src", "tests"]
+python-version = "3.13"
 
 [tool.commitizen]
 name = "cz_customize"

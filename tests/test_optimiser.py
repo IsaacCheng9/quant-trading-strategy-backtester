@@ -1143,7 +1143,7 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
         }
     )
 
-    call_log = []
+    call_log: list[tuple[str, int] | tuple[str, int, int]] = []
 
     def mock_run_backtest(data, strategy_type, params, tickers):
         call_log.append(("backtest", len(data)))

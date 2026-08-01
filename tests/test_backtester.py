@@ -84,12 +84,12 @@ def _calculate_changes(values: list[float]) -> list[float]:
 )
 def test_backtester_initialisation(
     request: pytest.FixtureRequest,
-    strategy_class: BaseStrategy,
+    strategy_class: type[BaseStrategy],
     params: dict[str, Any],
     data_fixture: str,
 ) -> None:
     data = request.getfixturevalue(data_fixture)
-    strategy = strategy_class(params)  # type: ignore
+    strategy = strategy_class(params)
     backtester = Backtester(data, strategy)
 
     # Compare DataFrames
@@ -97,7 +97,7 @@ def test_backtester_initialisation(
     for col in data.columns:
         assert (backtester.data[col] == data[col]).all()
 
-    assert isinstance(backtester.strategy, strategy_class)  # type: ignore
+    assert isinstance(backtester.strategy, strategy_class)
     assert backtester.initial_capital == 100000.0
 
 
@@ -119,12 +119,12 @@ def test_backtester_initialisation(
 )
 def test_backtester_run(
     request: pytest.FixtureRequest,
-    strategy_class: BaseStrategy,
+    strategy_class: type[BaseStrategy],
     params: dict[str, Any],
     data_fixture: str,
 ) -> None:
     data = request.getfixturevalue(data_fixture)
-    strategy = strategy_class(params)  # type: ignore
+    strategy = strategy_class(params)
     backtester = Backtester(data, strategy)
     results = backtester.run()
     assert isinstance(results, pl.DataFrame)
@@ -161,12 +161,12 @@ def test_backtester_run(
 )
 def test_backtester_get_performance_metrics(
     request: pytest.FixtureRequest,
-    strategy_class: BaseStrategy,
+    strategy_class: type[BaseStrategy],
     params: dict[str, Any],
     data_fixture: str,
 ) -> None:
     data = request.getfixturevalue(data_fixture)
-    strategy = strategy_class(params)  # type: ignore
+    strategy = strategy_class(params)
     backtester = Backtester(data, strategy)
     backtester.run()
     metrics = backtester.get_performance_metrics()
@@ -200,7 +200,7 @@ def test_backtester_get_performance_metrics(
     ],
 )
 def test_backtester_with_invalid_data(
-    strategy_class: BaseStrategy, params: dict[str, Any]
+    strategy_class: type[BaseStrategy], params: dict[str, Any]
 ) -> None:
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
     if strategy_class == PairsTradingStrategy:
@@ -220,7 +220,7 @@ def test_backtester_with_invalid_data(
             }
         )
 
-    strategy = strategy_class(params)  # type: ignore
+    strategy = strategy_class(params)
     backtester = Backtester(invalid_data, strategy)
 
     with pytest.raises((KeyError, ValueError, pl.exceptions.ColumnNotFoundError)):
@@ -239,7 +239,7 @@ def test_backtester_with_invalid_data(
     ],
 )
 def test_backtester_with_insufficient_data_all_strategies(
-    strategy_class: BaseStrategy, params: dict[str, Any]
+    strategy_class: type[BaseStrategy], params: dict[str, Any]
 ) -> None:
     dates = [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)]
     if strategy_class == PairsTradingStrategy:
@@ -258,7 +258,7 @@ def test_backtester_with_insufficient_data_all_strategies(
             }
         )
 
-    strategy = strategy_class(params)  # type: ignore
+    strategy = strategy_class(params)
     backtester = Backtester(insufficient_data, strategy)
     results = backtester.run()
 

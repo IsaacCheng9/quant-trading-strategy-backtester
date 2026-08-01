@@ -57,8 +57,9 @@ def test_load_yfinance_data_two_tickers(
                 ("High", "MSFT"): base_data["High"],
             }
         )
+        # Pandas stubs lose tuple-key column types during DataFrame construction.
         multi_index_data.columns = pd.MultiIndex.from_tuples(
-            list(multi_index_data.columns)  # type: ignore[invalid-argument-type]
+            list(multi_index_data.columns)  # pyrefly: ignore[bad-argument-type]
         )
         return multi_index_data
 
