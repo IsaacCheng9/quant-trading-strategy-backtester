@@ -1,7 +1,7 @@
 [project]
 name = "quant-trading-strategy-backtester"
 description = "A quantitative trading strategy backtester with an interactive dashboard. Enables users to implement, test, and visualise trading strategies using historical market data, featuring customisable parameters and key performance metrics. Developed with Python."
-version = "0.8.8"
+version = "0.8.9"
 readme = "README.md"
 authors = [
     { name = "Isaac Cheng", email = "47993930+IsaacCheng9@users.noreply.github.com" },
@@ -57,7 +57,7 @@ python-version = "3.13"
 
 [tool.commitizen]
 name = "cz_customize"
-version = "0.8.8"
+version = "0.8.9"
 version_files = [
     "pyproject.toml:version",
     "pyproject.toml:tool.commitizen.version",
