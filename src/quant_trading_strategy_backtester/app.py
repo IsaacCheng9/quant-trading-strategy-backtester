@@ -643,9 +643,9 @@ def display_historical_results():
             try:
                 params = json.loads(str(strategy.parameters))
             except (json.JSONDecodeError, TypeError):
-                params = strategy.parameters
+                params = cast(dict[str, Any], strategy.parameters)
             total_return = strategy.total_return
-            sharpe_ratio: float = strategy.sharpe_ratio  # type: ignore
+            sharpe_ratio = cast(float | None, strategy.sharpe_ratio)
             max_drawdown = strategy.max_drawdown
             start_date = strategy.start_date
             end_date = strategy.end_date
@@ -655,7 +655,7 @@ def display_historical_results():
             tickers = strategy["tickers"]
             params: dict = strategy["parameters"]
             total_return = strategy["total_return"]
-            sharpe_ratio: float = strategy["sharpe_ratio"]
+            sharpe_ratio: float | None = strategy["sharpe_ratio"]
             max_drawdown = strategy["max_drawdown"]
             start_date = strategy["start_date"]
             end_date = strategy["end_date"]

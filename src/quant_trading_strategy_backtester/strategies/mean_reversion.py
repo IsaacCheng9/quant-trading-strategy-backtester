@@ -70,7 +70,7 @@ class MeanReversionStrategy(BaseStrategy):
                 ]
             )
 
-        indicators: pl.DataFrame = (  # type: ignore[invalid-assignment]
+        indicators: pl.DataFrame = (
             data.select([pl.col("Date"), pl.col("Close")])
             .lazy()
             .with_columns(

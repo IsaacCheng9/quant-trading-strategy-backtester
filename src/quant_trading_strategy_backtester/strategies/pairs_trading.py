@@ -104,7 +104,7 @@ class PairsTradingStrategy(BaseStrategy):
             & (pl.col("spread_std") > 0)
         )
 
-        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
+        signals: pl.DataFrame = (
             data.select(
                 [
                     pl.col("Date"),

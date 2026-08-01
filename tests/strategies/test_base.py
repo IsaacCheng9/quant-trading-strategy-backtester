@@ -31,14 +31,14 @@ from quant_trading_strategy_backtester.strategies.pairs_trading import (
     ],
 )
 def test_strategy_with_empty_data(
-    strategy_class: BaseStrategy, params: dict[str, Any]
+    strategy_class: type[BaseStrategy], params: dict[str, Any]
 ) -> None:
     empty_data = pl.DataFrame(
         schema=[("Close", pl.Float64)]
         if strategy_class != PairsTradingStrategy
         else [("Close_1", pl.Float64), ("Close_2", pl.Float64)]
     )
-    strategy = strategy_class(params)  # type: ignore
+    strategy = strategy_class(params)
     signals = strategy.generate_signals(empty_data)
 
     assert isinstance(signals, pl.DataFrame)

@@ -43,7 +43,7 @@ class BuyAndHoldStrategy(BaseStrategy):
                 ]
             )
 
-        signals: pl.DataFrame = (  # type: ignore[invalid-assignment]
+        signals: pl.DataFrame = (
             data.select([pl.col("Date"), pl.col("Close")])
             .with_row_index()
             .lazy()

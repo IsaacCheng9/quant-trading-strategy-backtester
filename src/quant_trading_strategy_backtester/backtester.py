@@ -11,7 +11,7 @@ import json
 import math
 import platform
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 import streamlit as st
@@ -84,7 +84,7 @@ def build_trade_ledger(results: pl.DataFrame) -> pl.DataFrame:
         )
 
     records: list[dict[str, Any]] = []
-    position_start_date: date | datetime | None = None
+    position_start_date: date | None = None
     previous_signal = 0.0
 
     for row in results.iter_rows(named=True):
@@ -168,8 +168,8 @@ def _classify_trade_reason(row: dict[str, Any], action: str) -> str:
 
 
 def _calculate_holding_period_days(
-    current_date: date | datetime,
-    position_start_date: date | datetime | None,
+    current_date: date,
+    position_start_date: date | None,
 ) -> int | None:
     """Return position age in calendar days for open or closing trades."""
     if position_start_date is None:
@@ -556,7 +556,7 @@ class Backtester:
         equity_curve = self.results["equity_curve"].cast(pl.Float64)
         running_peak = equity_curve.cum_max().clip(lower_bound=self.initial_capital)
         drawdowns = equity_curve / running_peak - 1
-        max_drawdown = float(drawdowns.cast(pl.Float64).min())  # type: ignore
+        max_drawdown = cast(float, drawdowns.cast(pl.Float64).min())
         max_drawdown_duration = _calculate_max_drawdown_duration(
             drawdowns.cast(pl.Float64)
         )
