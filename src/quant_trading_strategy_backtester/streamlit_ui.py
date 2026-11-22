@@ -191,35 +191,6 @@ def get_sidebar_inputs() -> tuple[BacktestConfig, bool]:
     return config, submitted
 
 
-def get_user_inputs_except_strategy_params() -> tuple[
-    str | tuple[str, str] | None, datetime.date, datetime.date, str, bool
-]:
-    """Collect user inputs besides strategy parameters from the sidebar.
-
-    Returns:
-        A tuple containing the ticker symbol(s), start date, end date, strategy
-        type, and whether to use automatic ticker selection.
-    """
-    strategy_type = st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
-    auto_select_tickers = _render_auto_select_checkbox(strategy_type)
-    ticker = _render_ticker_inputs(
-        strategy_type,
-        auto_select_tickers,
-        container=st.sidebar,
-    )
-
-    start_date = st.sidebar.date_input("Start Date", value=datetime.date(2020, 1, 1))
-    end_date = st.sidebar.date_input("End Date", value=datetime.date(2023, 12, 31))
-
-    return (
-        ticker,
-        start_date,
-        end_date,
-        strategy_type,
-        auto_select_tickers,
-    )
-
-
 def get_optimisation_ranges(strategy_type: str) -> dict[str, Any]:
     """Return parameter ranges for optimisation based on the selected strategy.
 
@@ -317,41 +288,3 @@ def get_fixed_params(strategy_type: str, container: Any = None) -> dict[str, Any
             return {}
         case _:
             raise ValueError(f"Unexpected strategy type: {strategy_type}")
-
-
-def get_user_inputs_for_strategy_params(
-    strategy_type: str,
-    auto_select_tickers: bool = False,
-) -> tuple[bool, bool, dict[str, float] | dict[str, range] | dict[str, list[float]]]:
-    """Collect user inputs for strategy parameters from the Streamlit sidebar.
-
-    Args:
-        strategy_type: The type of strategy selected by the user.
-        auto_select_tickers: Whether the app will select tickers automatically.
-
-    Returns:
-        Whether to optimise, whether to use walk-forward validation, and the
-        strategy parameters.
-    """
-    if strategy_type == "Buy and Hold":
-        return False, False, {}
-
-    optimise = st.sidebar.checkbox("Optimise Strategy Parameters")
-    walk_forward = False
-
-    if optimise:
-        params = get_optimisation_ranges(strategy_type)
-        walk_forward_checked = st.sidebar.checkbox(
-            "Use Walk-Forward Validation",
-            help=(
-                WALK_FORWARD_HELP_DISABLED
-                if auto_select_tickers
-                else WALK_FORWARD_HELP_ENABLED
-            ),
-            disabled=auto_select_tickers,
-        )
-        walk_forward = False if auto_select_tickers else walk_forward_checked
-    else:
-        params = get_fixed_params(strategy_type, container=st.sidebar)
-
-    return optimise, walk_forward, params

@@ -1038,7 +1038,7 @@ def display_historical_results(store: StrategyStore | None = None) -> None:
     # Display stored strategy records newest first.
     for strategy in strategies:
         ticker_display = (
-            " vs. ".join(str(t) for t in strategy.tickers)
+            " vs. ".join(strategy.tickers)
             if isinstance(strategy.tickers, list)
             else strategy.tickers
         )
