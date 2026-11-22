@@ -2,7 +2,11 @@ name: Test
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -13,18 +17,15 @@ jobs:
           - "3.13.x"
 
     steps:
-      - uses: actions/checkout@main
-
-      - name: Switch to current branch
-        run: git checkout ${{ env.BRANCH }}
+      - uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@main
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
       - name: Install uv
-        uses: astral-sh/setup-uv@main
+        uses: astral-sh/setup-uv@v5
 
       - name: Install the project
         run: uv sync --all-extras --dev

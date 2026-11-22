@@ -703,6 +703,7 @@ def test_buy_and_hold_charges_initial_entry_cost_only():
         for no_cost, with_cost in zip(
             results_no_costs["strategy_returns"],
             results_with_costs["strategy_returns"],
+            strict=True,
         )
     ]
 
