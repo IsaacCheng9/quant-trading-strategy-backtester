@@ -8,6 +8,7 @@ import itertools
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any, cast
 
 import polars as pl
@@ -53,6 +54,34 @@ WALK_FORWARD_FOLDS = 5
 
 ProgressCallback = Callable[[int, int, str], None]
 StatusCallback = Callable[[str], None]
+
+
+@dataclass(frozen=True)
+class PortfolioPosition:
+    """Represent a portfolio's closing position at a fold boundary.
+
+    Attributes:
+        signal: Directional position signal (-1.0, 0.0, or 1.0).
+        leg_1_weight: Optional normalised weight for asset 1 in pairs trading.
+        leg_2_weight: Optional normalised weight for asset 2 in pairs trading.
+    """
+
+    signal: float
+    leg_1_weight: float | None = None
+    leg_2_weight: float | None = None
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.signal):
+            raise ValueError("PortfolioPosition signal must be finite")
+        if (self.leg_1_weight is None) != (self.leg_2_weight is None):
+            raise ValueError(
+                "PortfolioPosition leg_1_weight and leg_2_weight must both be "
+                "set or both be None"
+            )
+        if self.leg_1_weight is not None and not math.isfinite(self.leg_1_weight):
+            raise ValueError("PortfolioPosition leg_1_weight must be finite")
+        if self.leg_2_weight is not None and not math.isfinite(self.leg_2_weight):
+            raise ValueError("PortfolioPosition leg_2_weight must be finite")
 
 
 def _split_data(
@@ -161,12 +190,15 @@ def evaluate_validation_period(
     initial_capital: float = DEFAULT_INITIAL_CAPITAL,
     transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
     slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
+    prior_position: PortfolioPosition | None = None,
 ) -> tuple[pl.DataFrame, dict[str, float]]:
     """Evaluate validation rows while preserving prior strategy state.
 
     Run the strategy over all data available through the validation period,
-    retain only validation dates, and reset cumulative metrics at the
-    validation boundary.
+    retain only validation dates, optionally reconcile row 0 against the prior
+    fold's closing position so boundary returns, turnover, and costs reflect
+    actual portfolio carry, and reset cumulative metrics at the validation
+    boundary.
 
     Args:
         context_data: Price data through the end of the validation period.
@@ -177,12 +209,18 @@ def evaluate_validation_period(
         initial_capital: Capital used to reset the validation equity curve.
         transaction_cost_bps: Transaction cost per trade in basis points.
         slippage_bps: Slippage per trade in basis points.
+        prior_position: Optional closing position carried from the preceding
+            walk-forward fold. When provided, row 0's overnight gross return,
+            position/leg weight changes, turnover, and transaction costs are
+            reconciled from this position instead of the current parameter
+            set's hypothetical prior-context position.
 
     Returns:
         Validation-period results and performance metrics.
 
     Raises:
-        ValueError: If validation data is empty or produces no result rows.
+        ValueError: If validation data is empty, produces no result rows, or
+            lacks columns required for fold-transition reconciliation.
     """
     if validation_data.is_empty():
         raise ValueError("Validation data must not be empty")
@@ -197,9 +235,21 @@ def evaluate_validation_period(
         slippage_bps=slippage_bps,
     )
     validation_dates = validation_data.select(pl.col("Date").unique())
-    validation_results = context_results.join(validation_dates, on="Date", how="inner")
+    validation_results = context_results.join(
+        validation_dates, on="Date", how="inner", maintain_order="left"
+    )
     if validation_results.is_empty():
         raise ValueError("Validation dates produced no backtest results")
+
+    if prior_position is not None:
+        validation_results = _reconcile_fold_transition(
+            validation_results,
+            prior_position,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+        )
+    else:
+        validation_results = _normalise_transition_column_dtypes(validation_results)
 
     validation_results = _reset_cumulative_result_columns(
         validation_results,
@@ -223,6 +273,213 @@ def evaluate_validation_period(
         raise ValueError("Validation period produced no performance metrics")
 
     return validation_results, metrics
+
+
+def _finite_float(value: Any) -> float:
+    """Return value as a finite float, falling back to 0.0."""
+    if value is None:
+        return 0.0
+
+    numeric = float(value)
+    return numeric if math.isfinite(numeric) else 0.0
+
+
+def _extract_closing_position(results: pl.DataFrame) -> PortfolioPosition:
+    """Extract the closing portfolio position from the final result row.
+
+    Args:
+        results: Non-empty backtest results DataFrame.
+
+    Returns:
+        The closing signal and optional pairs leg weights.
+
+    Raises:
+        ValueError: If results is empty or lacks a signal column.
+    """
+    if results.is_empty():
+        raise ValueError("Cannot extract closing position from empty results")
+    if "signal" not in results.columns:
+        raise ValueError("Backtest results must contain a 'signal' column")
+
+    signal = _finite_float(results["signal"][-1])
+    if "leg_1_weight" in results.columns and "leg_2_weight" in results.columns:
+        return PortfolioPosition(
+            signal=signal,
+            leg_1_weight=_finite_float(results["leg_1_weight"][-1]),
+            leg_2_weight=_finite_float(results["leg_2_weight"][-1]),
+        )
+
+    return PortfolioPosition(signal=signal)
+
+
+def _normalise_transition_column_dtypes(results: pl.DataFrame) -> pl.DataFrame:
+    """Cast fold-transition numeric columns to Float64 for uniform schemas."""
+    transition_columns = (
+        "gross_strategy_returns",
+        "position_change",
+        "leg_1_weight_change",
+        "leg_2_weight_change",
+        "trade_turnover",
+        "pair_turnover",
+        "transaction_costs",
+        "strategy_returns",
+    )
+    casts = [
+        pl.col(column).cast(pl.Float64)
+        for column in transition_columns
+        if column in results.columns and results.schema[column] != pl.Float64
+    ]
+    if not casts:
+        return results
+    return results.with_columns(casts)
+
+
+def _reconcile_fold_transition(
+    validation_results: pl.DataFrame,
+    prior_position: PortfolioPosition,
+    transaction_cost_bps: float,
+    slippage_bps: float,
+) -> pl.DataFrame:
+    """Reconcile row 0 of validation results against the prior fold position.
+
+    Recompute the fold-boundary bar's overnight gross return from the actual
+    closing position of the previous fold, then charge transition turnover and
+    costs to rebalance into row 0's target position.
+
+    Args:
+        validation_results: Validation-period backtest results.
+        prior_position: Actual closing position from the preceding fold.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
+
+    Returns:
+        Validation results with row 0 reconciled and Float64 dtypes preserved.
+
+    Raises:
+        ValueError: If required columns or pairs leg weights are missing.
+    """
+    cost_rate = (transaction_cost_bps + slippage_bps) / 10_000
+    is_pairs = (
+        "leg_1_weight" in validation_results.columns
+        and "leg_2_weight" in validation_results.columns
+    )
+
+    if is_pairs:
+        if prior_position.leg_1_weight is None or prior_position.leg_2_weight is None:
+            raise ValueError(
+                "Pairs fold transition requires leg_1_weight and leg_2_weight "
+                "on prior_position"
+            )
+        required_columns = {
+            "signal",
+            "leg_1_weight",
+            "leg_2_weight",
+            "asset_1_returns",
+            "asset_2_returns",
+            "gross_strategy_returns",
+            "position_change",
+            "leg_1_weight_change",
+            "leg_2_weight_change",
+            "trade_turnover",
+            "transaction_costs",
+            "strategy_returns",
+        }
+        missing_columns = required_columns - set(validation_results.columns)
+        if missing_columns:
+            raise ValueError(
+                "Pairs validation results missing required columns for fold "
+                f"transition: {sorted(missing_columns)}"
+            )
+
+        a1_ret = _finite_float(validation_results["asset_1_returns"][0])
+        a2_ret = _finite_float(validation_results["asset_2_returns"][0])
+        gross_ret = (
+            prior_position.leg_1_weight * a1_ret + prior_position.leg_2_weight * a2_ret
+        )
+        if not math.isfinite(gross_ret):
+            gross_ret = 0.0
+
+        pos_change = (
+            _finite_float(validation_results["signal"][0]) - prior_position.signal
+        )
+        l1_change = (
+            _finite_float(validation_results["leg_1_weight"][0])
+            - prior_position.leg_1_weight
+        )
+        l2_change = (
+            _finite_float(validation_results["leg_2_weight"][0])
+            - prior_position.leg_2_weight
+        )
+        turnover = abs(l1_change) + abs(l2_change)
+        tx_cost = turnover * cost_rate
+        net_ret = gross_ret - tx_cost
+
+        row_updates: dict[str, float] = {
+            "gross_strategy_returns": gross_ret,
+            "position_change": pos_change,
+            "leg_1_weight_change": l1_change,
+            "leg_2_weight_change": l2_change,
+            "trade_turnover": turnover,
+            "transaction_costs": tx_cost,
+            "strategy_returns": net_ret,
+        }
+        if "pair_turnover" in validation_results.columns:
+            row_updates["pair_turnover"] = turnover
+    else:
+        if (
+            prior_position.leg_1_weight is not None
+            or prior_position.leg_2_weight is not None
+        ):
+            raise ValueError(
+                "Single-asset fold transition cannot accept leg_1_weight or "
+                "leg_2_weight on prior_position"
+            )
+        required_columns = {
+            "signal",
+            "asset_returns",
+            "gross_strategy_returns",
+            "position_change",
+            "trade_turnover",
+            "transaction_costs",
+            "strategy_returns",
+        }
+        missing_columns = required_columns - set(validation_results.columns)
+        if missing_columns:
+            raise ValueError(
+                "Validation results missing required columns for fold "
+                f"transition: {sorted(missing_columns)}"
+            )
+
+        asset_ret = _finite_float(validation_results["asset_returns"][0])
+        gross_ret = prior_position.signal * asset_ret
+        if not math.isfinite(gross_ret):
+            gross_ret = 0.0
+
+        pos_change = (
+            _finite_float(validation_results["signal"][0]) - prior_position.signal
+        )
+        turnover = abs(pos_change)
+        tx_cost = turnover * cost_rate
+        net_ret = gross_ret - tx_cost
+
+        row_updates = {
+            "gross_strategy_returns": gross_ret,
+            "position_change": pos_change,
+            "trade_turnover": turnover,
+            "transaction_costs": tx_cost,
+            "strategy_returns": net_ret,
+        }
+
+    is_first_row = pl.int_range(pl.len()) == 0
+    return validation_results.with_columns(
+        [
+            pl.when(is_first_row)
+            .then(pl.lit(value, dtype=pl.Float64))
+            .otherwise(pl.col(column).cast(pl.Float64))
+            .alias(column)
+            for column, value in row_updates.items()
+        ]
+    )
 
 
 def _has_prior_context(
@@ -1017,7 +1274,7 @@ def stitch_walk_forward_oos_results(
             )
         oos_frames.append(oos_results)
 
-    stitched_results = pl.concat(oos_frames, how="vertical")
+    stitched_results = pl.concat(oos_frames, how="vertical_relaxed")
     if "Date" in stitched_results.columns:
         stitched_results = stitched_results.sort("Date")
     stitched_results = _reset_cumulative_result_columns(
@@ -1060,9 +1317,11 @@ def walk_forward_optimise(
     remainder rows to the final fold so tail observations are not dropped. For
     each fold, run grid search on the expanding training window and evaluate
     that fold's in-sample optimal parameters on its out-of-sample fold with
-    prior rolling context. Concatenate the per-fold out-of-sample return
-    streams into one stitched out-of-sample series to compute portfolio-level
-    metrics.
+    prior rolling context. Carry each fold's actual closing position across
+    the fold boundary into the next fold so boundary overnight returns,
+    turnover, and transaction/slippage costs reflect real transitions when
+    parameters change. Concatenate the per-fold out-of-sample return streams
+    into one stitched out-of-sample series to compute portfolio-level metrics.
 
     Args:
         data: Historical price data.
@@ -1110,6 +1369,7 @@ def walk_forward_optimise(
 
     fold_results: list[dict[str, Any]] = []
     completed_steps = 0
+    prior_position: PortfolioPosition | None = None
 
     for fold in range(n_folds):
         train_end = segment_size * (fold + 1)
@@ -1146,7 +1406,8 @@ def walk_forward_optimise(
         if best_params is None:
             raise ValueError(f"Walk-forward optimisation failed on fold {fold + 1}")
 
-        # Evaluate out of sample without cold-starting rolling strategy state.
+        # Evaluate out of sample with rolling context and carry the previous
+        # fold's closing position across the boundary.
         oos_results, oos_metrics = evaluate_validation_period(
             data[:test_end],
             test_data,
@@ -1156,7 +1417,9 @@ def walk_forward_optimise(
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,
             slippage_bps=slippage_bps,
+            prior_position=prior_position,
         )
+        prior_position = _extract_closing_position(oos_results)
 
         fold_results.append(
             {
