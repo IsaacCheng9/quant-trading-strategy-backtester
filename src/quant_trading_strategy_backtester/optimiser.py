@@ -7,11 +7,10 @@ import datetime
 import itertools
 import math
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 import polars as pl
-import streamlit as st
 
 from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.cointegration import (
@@ -45,6 +44,9 @@ from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
 
 TRAIN_RATIO = 0.7
 WALK_FORWARD_FOLDS = 5
+
+ProgressCallback = Callable[[int, int, str], None]
+StatusCallback = Callable[[str], None]
 
 
 def _split_data(
@@ -242,35 +244,6 @@ def count_candidate_pairs(top_companies: list[tuple[str, float]]) -> int:
     return len(_candidate_pairs(top_companies))
 
 
-def _display_parameter_search_context(
-    data: pl.DataFrame,
-    strategy_type: str,
-    parameter_ranges: Mapping[str, range | list[int | float] | int | float],
-    walk_forward: bool,
-) -> None:
-    """Display durable Streamlit context for parameter optimisation."""
-    valid_combinations = count_valid_parameter_combinations(
-        strategy_type, parameter_ranges
-    )
-    if walk_forward:
-        st.info(
-            "Parameter optimisation tests "
-            f"{valid_combinations} valid combinations across "
-            f"{WALK_FORWARD_FOLDS} expanding walk-forward folds. "
-            "Displayed optimisation metrics are aggregated out-of-sample "
-            "fold results."
-        )
-        return
-
-    train_data, test_data = _split_data(data)
-    st.info(
-        "Parameter optimisation tests "
-        f"{valid_combinations} valid combinations on {len(train_data)} "
-        f"training rows. Displayed optimisation metrics use {len(test_data)} "
-        "held-out test rows."
-    )
-
-
 def run_optimisation(
     data: pl.DataFrame,
     strategy_type: str,
@@ -279,9 +252,11 @@ def run_optimisation(
     end_date: datetime.date,
     tickers: str | list[str],
     walk_forward: bool = False,
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
+    fold_results_callback: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> tuple[dict[str, Any], dict[str, float]]:
-    """
-    Runs the optimisation process for strategy parameters or ticker selection.
+    """Run optimisation for strategy parameters or ticker selection.
 
     Args:
         data: Historical price data.
@@ -291,104 +266,75 @@ def run_optimisation(
         end_date: End date for historical data.
         tickers: The ticker or tickers used in the backtest.
         walk_forward: Whether to use walk-forward validation.
+        progress_callback: Optional callback invoked as
+            (current, total, message) during candidate evaluation.
+        status_callback: Optional callback invoked with informational status
+            messages.
+        fold_results_callback: Optional callback invoked with per-fold
+            walk-forward results when walk_forward is True.
 
     Returns:
         A tuple containing:
-            - Optimised strategy parameters or selected ticker.
+            - Optimised strategy parameters or selected ticker parameters.
             - Performance metrics for the optimised strategy.
     """
-    st.info("Optimising strategy. This may take a while...")
-    start_time = time.time()
-
     if strategy_type == "Buy and Hold":
         top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
         best_ticker, strategy_params, metrics = optimise_buy_and_hold_ticker(
-            top_companies, start_date, end_date
+            top_companies,
+            start_date,
+            end_date,
+            progress_callback=progress_callback,
+            status_callback=status_callback,
         )
-        st.success(f"Best ticker for Buy and Hold: {best_ticker}")
+        if status_callback is not None:
+            status_callback(f"Best ticker for Buy and Hold: {best_ticker}")
     elif walk_forward:
-        _display_parameter_search_context(
-            data,
-            strategy_type,
-            cast(dict[str, range | list[int | float] | int | float], strategy_params),
-            walk_forward=True,
-        )
         strategy_params, metrics, fold_results = walk_forward_optimise(
             data,
             strategy_type,
             cast(dict[str, range | list[int | float]], strategy_params),
             tickers,
+            progress_callback=progress_callback,
+            status_callback=status_callback,
         )
-        _display_walk_forward_results(fold_results)
+        if fold_results_callback is not None:
+            fold_results_callback(fold_results)
     else:
         train_data, test_data = _split_data(data)
-        _display_parameter_search_context(
-            data,
-            strategy_type,
-            cast(dict[str, range | list[int | float] | int | float], strategy_params),
-            walk_forward=False,
-        )
         strategy_params, metrics = optimise_strategy_params(
             train_data,
             strategy_type,
             cast(dict[str, range | list[int | float]], strategy_params),
             tickers,
             test_data=test_data,
+            progress_callback=progress_callback,
+            status_callback=status_callback,
         )
 
-    end_time = time.time()
-    duration = end_time - start_time
-    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
-
-    st.header("Optimal Parameters")
-    st.write(strategy_params)
-
     return strategy_params, metrics
-
-
-def _display_walk_forward_results(fold_results: list[dict]) -> None:
-    """
-    Display per-fold walk-forward validation results in the Streamlit
-    UI.
-
-    Args:
-        fold_results: List of per-fold result dictionaries from
-            walk_forward_optimise().
-    """
-    with st.expander("Walk-Forward Validation Details"):
-        for fold in fold_results:
-            st.subheader(f"Fold {fold['fold']}")
-            st.write(
-                f"Train: {fold['train_rows']} rows, Test: {fold['test_rows']} rows"
-            )
-            st.write(f"Best params: {fold['params']}")
-            col1, col2 = st.columns(2)
-            col1.metric(
-                "In-Sample Sharpe",
-                f"{fold['in_sample_sharpe']:.4f}",
-            )
-            col2.metric(
-                "Out-of-Sample Sharpe",
-                f"{fold['oos_metrics']['Sharpe Ratio']:.4f}",
-            )
 
 
 def optimise_buy_and_hold_ticker(
     top_companies: list[tuple[str, float]],
     start_date: datetime.date,
     end_date: datetime.date,
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, float]]:
-    """
-    Optimises ticker selection for the Buy and Hold strategy.
+    """Optimise ticker selection for the Buy and Hold strategy.
 
-    Uses a 70/30 train/test split: tickers are ranked by total return on
-    training data, and the winner is re-evaluated on test data.
+    Use a 70/30 train/test split: rank tickers by total return on training
+    data, then re-evaluate the winner on test data.
 
     Args:
-        top_companies: List of tuples containing ticker symbols and market caps
-                       of top companies.
+        top_companies: List of tuples containing ticker symbols and market
+            caps of top companies.
         start_date: Start date for historical data.
         end_date: End date for historical data.
+        progress_callback: Optional callback invoked as
+            (current, total, message) for each candidate ticker.
+        status_callback: Optional callback invoked with summary messages.
 
     Returns:
         A tuple containing the best ticker, strategy parameters, and
@@ -400,12 +346,14 @@ def optimise_buy_and_hold_ticker(
     evaluated_tickers = 0
 
     total_tickers = len(top_companies)
-    progress_bar = st.progress(0)
-    status_text = st.empty()
 
     for i, (ticker, _) in enumerate(top_companies):
-        status_text.text(f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}")
-        progress_bar.progress((i + 1) / total_tickers)
+        if progress_callback is not None:
+            progress_callback(
+                i + 1,
+                total_tickers,
+                f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}",
+            )
 
         data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
         if data is None or data.is_empty():
@@ -427,13 +375,12 @@ def optimise_buy_and_hold_ticker(
             best_ticker = ticker
             best_test_data = test_data
 
-    progress_bar.empty()
-    status_text.empty()
-    st.info(
-        f"Ticker selection evaluated {evaluated_tickers} of {total_tickers} "
-        "candidates. Ranking used the training split and final metrics use "
-        "the held-out test split."
-    )
+    if status_callback is not None:
+        status_callback(
+            f"Ticker selection evaluated {evaluated_tickers} of {total_tickers} "
+            "candidates. Ranking used the training split and final metrics use "
+            "the held-out test split."
+        )
 
     if not best_ticker or best_test_data is None:
         raise ValueError("Buy and Hold optimisation failed")
@@ -453,20 +400,24 @@ def optimise_single_ticker_strategy_ticker(
     end_date: datetime.date,
     strategy_type: str,
     strategy_params: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> str:
-    """
-    Optimises ticker selection for single ticker strategies.
+    """Optimise ticker selection for single-ticker strategies.
 
-    Uses a 70/30 train/test split: tickers are ranked by Sharpe ratio on
-    training data.
+    Use a 70/30 train/test split and rank tickers by Sharpe ratio on training
+    data.
 
     Args:
-        top_companies: List of tuples containing ticker symbols and market caps
-                       of top companies.
+        top_companies: List of tuples containing ticker symbols and market
+            caps of top companies.
         start_date: Start date for historical data.
         end_date: End date for historical data.
         strategy_type: The type of strategy being used.
         strategy_params: Strategy parameters.
+        progress_callback: Optional callback invoked as
+            (current, total, message) for each candidate ticker.
+        status_callback: Optional callback invoked with summary messages.
 
     Returns:
         The best ticker.
@@ -476,18 +427,20 @@ def optimise_single_ticker_strategy_ticker(
     evaluated_tickers = 0
 
     total_tickers = len(top_companies)
-    progress_bar = st.progress(0)
-    status_text = st.empty()
 
-    # Use fixed parameter values for ticker evaluation
+    # Use fixed parameter values for ticker evaluation.
     fixed_params = {
         k: v[0] if isinstance(v, (list, range)) else v
         for k, v in strategy_params.items()
     }
 
     for i, (ticker, _) in enumerate(top_companies):
-        status_text.text(f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}")
-        progress_bar.progress((i + 1) / total_tickers)
+        if progress_callback is not None:
+            progress_callback(
+                i + 1,
+                total_tickers,
+                f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}",
+            )
 
         data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
         if data is None or data.is_empty():
@@ -502,13 +455,12 @@ def optimise_single_ticker_strategy_ticker(
             best_sharpe_ratio = score
             best_ticker = ticker
 
-    progress_bar.empty()
-    status_text.empty()
-    st.info(
-        f"Ticker selection evaluated {evaluated_tickers} of {total_tickers} "
-        "candidates. Ranking used the training split; displayed results use "
-        "the validation split."
-    )
+    if status_callback is not None:
+        status_callback(
+            f"Ticker selection evaluated {evaluated_tickers} of {total_tickers} "
+            "candidates. Ranking used the training split; displayed results use "
+            "the validation split."
+        )
 
     if not best_ticker:
         raise ValueError("Single ticker strategy ticker optimisation failed")
@@ -522,22 +474,26 @@ def optimise_strategy_params(
     parameter_ranges: dict[str, range | list[int | float]],
     tickers: str | list[str],
     test_data: pl.DataFrame | None = None,
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> tuple[dict[str, int | float], dict[str, float]]:
-    """
-    Optimises strategy parameters by testing all combinations within given
-    ranges.
+    """Optimise strategy parameters across all valid grid combinations.
 
-    Grid search runs on `data` (training set). If `test_data` is provided,
-    the best parameters are evaluated on it and out-of-sample metrics are
-    returned. Otherwise, in-sample metrics are returned.
+    Run grid search on `data` (training set). If `test_data` is provided,
+    evaluate the best parameters on it and return out-of-sample metrics.
+    Otherwise, return in-sample metrics.
 
     Args:
         data: Training price data for grid search.
         strategy_type: The type of strategy to optimise.
         parameter_ranges: A dictionary of parameters and their possible values
-                          to test.
+            to test.
         tickers: The ticker or tickers used in the backtest.
         test_data: Optional held-out test data for out-of-sample evaluation.
+        progress_callback: Optional callback invoked as
+            (current, total, message) for each parameter combination.
+        status_callback: Optional callback invoked with search context
+            messages.
 
     Returns:
         A tuple containing the best parameters and their performance metrics.
@@ -551,15 +507,28 @@ def optimise_strategy_params(
     if total_combinations == 0:
         raise ValueError(f"No valid parameter combinations for {strategy_type}")
 
-    # Display progress bar and status text, as this process may take a while.
-    progress_bar = st.progress(0)
-    status_text = st.empty()
+    if status_callback is not None:
+        if test_data is not None:
+            status_callback(
+                "Parameter optimisation tests "
+                f"{total_combinations} valid combinations on {len(data)} "
+                f"training rows. Displayed optimisation metrics use "
+                f"{len(test_data)} held-out test rows."
+            )
+        else:
+            status_callback(
+                "Parameter optimisation tests "
+                f"{total_combinations} valid combinations on {len(data)} "
+                "training rows."
+            )
 
     for i, current_params in enumerate(param_combinations):
-        status_text.text(
-            f"Evaluating parameter combination {i + 1} / {total_combinations}"
-        )
-        progress_bar.progress((i + 1) / total_combinations)
+        if progress_callback is not None:
+            progress_callback(
+                i + 1,
+                total_combinations,
+                f"Evaluating parameter combination {i + 1} / {total_combinations}",
+            )
 
         _, metrics = run_backtest(data, strategy_type, current_params, tickers)
 
@@ -569,8 +538,6 @@ def optimise_strategy_params(
             best_params = current_params
             best_metrics = metrics
 
-    progress_bar.empty()
-    status_text.empty()
     if not best_params or not best_metrics:
         raise ValueError("Parameter optimisation failed")
 
@@ -596,23 +563,27 @@ def optimise_pairs_trading_tickers(
     strategy_params: dict[str, Any],
     optimise: bool,
     cointegration_p_value_threshold: float = COINTEGRATION_P_VALUE_THRESHOLD,
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> tuple[tuple[str, str], dict[str, Any], dict[str, float]]:
-    """
-    Optimises ticker pair selection and strategy parameters for pairs trading.
+    """Optimise ticker pair selection and parameters for pairs trading.
 
-    Uses a 70/30 train/test split: pairs are ranked by Sharpe ratio on
-    training data. When `optimise` is True, parameter fitting also runs
-    on training data and the winner is evaluated on test data.
+    Use a 70/30 train/test split and rank pairs by Sharpe ratio on training
+    data. When `optimise` is True, fit parameters on training data and
+    evaluate the winning pair on test data.
 
     Args:
-        top_companies: List of tuples containing ticker symbols and market caps
-                       of top companies.
+        top_companies: List of tuples containing ticker symbols and market
+            caps of top companies.
         start_date: Start date for historical data.
         end_date: End date for historical data.
         strategy_params: Strategy parameters or parameter ranges.
         optimise: Whether to optimise the strategy parameters.
         cointegration_p_value_threshold: Maximum Engle-Granger p-value
             accepted for automatic pair selection.
+        progress_callback: Optional callback invoked as
+            (current, total, message) for each candidate pair.
+        status_callback: Optional callback invoked with summary messages.
 
     Returns:
         A tuple containing the best ticker pair, best parameters, and best
@@ -638,19 +609,19 @@ def optimise_pairs_trading_tickers(
             "Pairs Trading", optimisation_parameter_ranges
         )
 
-    # Display progress bar and status text, as this process may take a while.
-    progress_bar = st.progress(0)
-    status_text = st.empty()
     prev_pair_processing_time = 0.0
     rejected_pairs = 0
 
     for i, (ticker1, ticker2) in enumerate(ticker_pairs):
         start_time = time.time()
-        status_text.text(
-            f"Evaluating pair {i + 1} / {total_combinations}: {ticker1} vs. {ticker2} "
-            f"(prev. pair processing time: {prev_pair_processing_time:.4f} seconds)"
-        )
-        progress_bar.progress((i + 1) / total_combinations)
+        if progress_callback is not None:
+            progress_callback(
+                i + 1,
+                total_combinations,
+                f"Evaluating pair {i + 1} / {total_combinations}: "
+                f"{ticker1} vs. {ticker2} "
+                f"(prev. pair processing time: {prev_pair_processing_time:.4f} seconds)",
+            )
 
         data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
         if data is None or data.is_empty():
@@ -695,8 +666,6 @@ def optimise_pairs_trading_tickers(
         end_time = time.time()
         prev_pair_processing_time = end_time - start_time
 
-    progress_bar.empty()
-    status_text.empty()
     if (
         not best_pair
         or not best_params
@@ -710,19 +679,20 @@ def optimise_pairs_trading_tickers(
         )
 
     cointegrated_pairs = evaluated_pairs - rejected_pairs
-    st.info(
-        f"Pair selection evaluated {evaluated_pairs} of {total_combinations} "
-        f"candidate pairs. The cointegration filter rejected {rejected_pairs}; "
-        "ranking used the training split and final metrics use the held-out "
-        "test split."
-    )
-    if optimise:
-        st.info(
-            "Pair parameter optimisation tested "
-            f"{parameter_combinations} valid combinations per cointegrated "
-            f"pair ({cointegrated_pairs * parameter_combinations} training "
-            "backtests)."
+    if status_callback is not None:
+        status_callback(
+            f"Pair selection evaluated {evaluated_pairs} of {total_combinations} "
+            f"candidate pairs. The cointegration filter rejected {rejected_pairs}; "
+            "ranking used the training split and final metrics use the held-out "
+            "test split."
         )
+        if optimise:
+            status_callback(
+                "Pair parameter optimisation tested "
+                f"{parameter_combinations} valid combinations per cointegrated "
+                f"pair ({cointegrated_pairs * parameter_combinations} training "
+                "backtests)."
+            )
 
     _, best_metrics = evaluate_validation_period(
         best_context_data,
@@ -741,11 +711,12 @@ def walk_forward_optimise(
     parameter_ranges: dict[str, range | list[int | float]],
     tickers: str | list[str],
     n_folds: int = WALK_FORWARD_FOLDS,
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
 ) -> tuple[dict[str, int | float], dict[str, float], list[dict]]:
-    """
-    Optimises strategy parameters using walk-forward validation.
+    """Optimise strategy parameters using walk-forward validation.
 
-    Splits data into (n_folds + 1) equal segments. For each fold, we use an
+    Split data into (n_folds + 1) equal segments. For each fold, use an
     expanding training window for grid search and evaluate the best parameters
     on the next segment. This tests parameter stability across time rather than
     depending on a single split point.
@@ -757,6 +728,10 @@ def walk_forward_optimise(
             possible values to test.
         tickers: The ticker or tickers used in the backtest.
         n_folds: Number of out-of-sample test folds.
+        progress_callback: Optional callback invoked as
+            (current, total, message) for each fold combination evaluation.
+        status_callback: Optional callback invoked with search context
+            messages.
 
     Returns:
         A tuple containing:
@@ -776,7 +751,19 @@ def walk_forward_optimise(
     if not param_combinations:
         raise ValueError(f"No valid parameter combinations for {strategy_type}")
 
+    total_combinations = len(param_combinations)
+    total_steps = n_folds * total_combinations
+    if status_callback is not None:
+        status_callback(
+            "Parameter optimisation tests "
+            f"{total_combinations} valid combinations across "
+            f"{n_folds} expanding walk-forward folds. "
+            "Displayed optimisation metrics are aggregated out-of-sample "
+            "fold results."
+        )
+
     fold_results: list[dict] = []
+    completed_steps = 0
 
     for fold in range(n_folds):
         train_end = segment_size * (fold + 1)
@@ -787,7 +774,15 @@ def walk_forward_optimise(
         # Grid search on training data.
         best_sharpe = float("-inf")
         best_params: dict[str, int | float] | None = None
-        for current_params in param_combinations:
+        for combo_idx, current_params in enumerate(param_combinations):
+            if progress_callback is not None:
+                completed_steps += 1
+                progress_callback(
+                    completed_steps,
+                    total_steps,
+                    f"Fold {fold + 1} / {n_folds}: evaluating combination "
+                    f"{combo_idx + 1} / {total_combinations}",
+                )
             _, metrics = run_backtest(
                 train_data, strategy_type, current_params, tickers
             )

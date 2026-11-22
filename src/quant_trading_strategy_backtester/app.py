@@ -14,6 +14,8 @@ import json
 import math
 import os
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,6 +35,7 @@ from quant_trading_strategy_backtester.data import (
     load_yfinance_data_two_tickers,
 )
 from quant_trading_strategy_backtester.optimiser import (
+    ProgressCallback,
     create_strategy,
     evaluate_validation_period,
     get_training_data,
@@ -61,10 +64,101 @@ from quant_trading_strategy_backtester.visualisation import (
     display_performance_metrics,
     display_returns_by_month,
     display_trade_ledger,
+    display_walk_forward_results,
     plot_equity_curve,
     plot_pairs_spread,
     plot_strategy_returns,
 )
+
+
+@st.cache_data
+def _cached_load_yfinance_data_one_ticker(
+    ticker: str, start_date: datetime.date, end_date: datetime.date
+) -> pl.DataFrame:
+    """Cache single-ticker Yahoo Finance downloads across Streamlit reruns."""
+    return load_yfinance_data_one_ticker(ticker, start_date, end_date)
+
+
+@st.cache_data
+def _cached_load_yfinance_data_two_tickers(
+    ticker1: str,
+    ticker2: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> pl.DataFrame:
+    """Cache two-ticker Yahoo Finance downloads across Streamlit reruns."""
+    return load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+
+
+@st.cache_data
+def _cached_get_top_sp500_companies(
+    num_companies: int,
+) -> list[tuple[str, float]]:
+    """Cache top S&P 500 market-cap rankings across Streamlit reruns."""
+    return get_top_sp500_companies(num_companies)
+
+
+@st.cache_data
+def _cached_get_full_company_name(ticker: str) -> str | None:
+    """Cache Yahoo Finance company name lookups across Streamlit reruns."""
+    return get_full_company_name(ticker)
+
+
+@contextmanager
+def _streamlit_progress() -> Iterator[ProgressCallback]:
+    """Yield a progress callback backed by Streamlit progress widgets."""
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    def update(current: int, total: int, message: str) -> None:
+        status_text.text(message)
+        if total > 0:
+            progress_bar.progress(min(max(current / total, 0.0), 1.0))
+
+    try:
+        yield update
+    finally:
+        progress_bar.empty()
+        status_text.empty()
+
+
+def _display_status_message(message: str) -> None:
+    """Display an informational optimisation status message in Streamlit."""
+    st.info(message)
+
+
+def _run_optimisation_with_ui(
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    tickers: str | list[str],
+    walk_forward: bool = False,
+) -> tuple[dict[str, Any], dict[str, float]]:
+    """Run optimisation with Streamlit progress and summary widgets."""
+    st.info("Optimising strategy. This may take a while...")
+    start_time = time.time()
+
+    with _streamlit_progress() as progress_callback:
+        optimised_params, metrics = run_optimisation(
+            data,
+            strategy_type,
+            strategy_params,
+            start_date,
+            end_date,
+            tickers,
+            walk_forward=walk_forward,
+            progress_callback=progress_callback,
+            status_callback=_display_status_message,
+            fold_results_callback=display_walk_forward_results,
+        )
+
+    duration = time.time() - start_time
+    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
+    st.header("Optimal Parameters")
+    st.write(optimised_params)
+    return optimised_params, metrics
 
 
 @st.cache_data
@@ -267,7 +361,7 @@ def _display_benchmark_comparison(
         benchmark_start_date, benchmark_end_date = _get_benchmark_date_range(
             backtest_data, prior_date=prior_date
         )
-        benchmark_data = load_yfinance_data_one_ticker(
+        benchmark_data = _cached_load_yfinance_data_one_ticker(
             BENCHMARK_TICKER, benchmark_start_date, benchmark_end_date
         )
     except Exception as exc:  # noqa: BLE001
@@ -336,16 +430,21 @@ def prepare_buy_and_hold_strategy_with_optimisation(
 
     start_time = time.time()
 
-    # Fetch the top S&P 500 companies
+    # Fetch the top S&P 500 companies.
     with st.spinner("Fetching top S&P 500 companies..."):
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
+        top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
 
-    # Optimise ticker selection
-    best_ticker, _, _ = optimise_buy_and_hold_ticker(
-        top_companies, start_date, end_date
-    )
+    # Optimise ticker selection.
+    with _streamlit_progress() as progress_callback:
+        best_ticker, _, _ = optimise_buy_and_hold_ticker(
+            top_companies,
+            start_date,
+            end_date,
+            progress_callback=progress_callback,
+            status_callback=_display_status_message,
+        )
 
-    # Calculate and display the time taken for optimisation
+    # Calculate and display the time taken for optimisation.
     end_time = time.time()
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
@@ -353,8 +452,8 @@ def prepare_buy_and_hold_strategy_with_optimisation(
     st.header("Exploratory Current-Universe Result")
     st.write(f"Selected ticker: {best_ticker}")
 
-    # Load historical data for the selected ticker
-    data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
+    # Load historical data for the selected ticker.
+    data = _cached_load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
 
     return data, best_ticker, {}
 
@@ -396,17 +495,24 @@ def prepare_single_ticker_strategy_with_optimisation(
 
     start_time = time.time()
 
-    # Fetch the top S&P 500 companies
+    # Fetch the top S&P 500 companies.
     with st.spinner("Fetching top S&P 500 companies..."):
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
+        top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
 
-    # Optimise ticker selection
-    best_ticker = optimise_single_ticker_strategy_ticker(
-        top_companies, start_date, end_date, strategy_type, strategy_params
-    )
+    # Optimise ticker selection.
+    with _streamlit_progress() as progress_callback:
+        best_ticker = optimise_single_ticker_strategy_ticker(
+            top_companies,
+            start_date,
+            end_date,
+            strategy_type,
+            strategy_params,
+            progress_callback=progress_callback,
+            status_callback=_display_status_message,
+        )
 
-    # Load historical data for the selected ticker
-    data = load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
+    # Load historical data for the selected ticker.
+    data = _cached_load_yfinance_data_one_ticker(best_ticker, start_date, end_date)
 
     # Optimise strategy parameters if requested.
     if optimise:
@@ -417,7 +523,7 @@ def prepare_single_ticker_strategy_with_optimisation(
                 "be partially in-sample. Enable walk-forward validation "
                 "for more robust out-of-sample evaluation."
             )
-        best_params, _ = run_optimisation(
+        best_params, _ = _run_optimisation_with_ui(
             data,
             strategy_type,
             strategy_params,
@@ -488,20 +594,29 @@ def prepare_pairs_trading_strategy_with_optimisation(
 
     start_time = time.time()
 
-    # Fetch the top S&P 500 companies
+    # Fetch the top S&P 500 companies.
     with st.spinner("Fetching top S&P 500 companies..."):
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_TWO_TICKERS)
+        top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_TWO_TICKERS)
 
     parameter_ranges = strategy_params
 
     # Optimise ticker pair selection and strategy parameters.
-    ticker, selected_strategy_params, _ = optimise_pairs_trading_tickers(
-        top_companies, start_date, end_date, strategy_params, optimise
-    )
+    with _streamlit_progress() as progress_callback:
+        ticker, selected_strategy_params, _ = optimise_pairs_trading_tickers(
+            top_companies,
+            start_date,
+            end_date,
+            strategy_params,
+            optimise,
+            progress_callback=progress_callback,
+            status_callback=_display_status_message,
+        )
     ticker1, ticker2 = ticker
 
     # Load historical data for the selected pair.
-    data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+    data = _cached_load_yfinance_data_two_tickers(
+        ticker1, ticker2, start_date, end_date
+    )
     ticker_display = f"{ticker1} vs. {ticker2}"
     _display_cointegration_result(
         get_training_data(data),
@@ -509,7 +624,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     )
 
     if optimise and walk_forward:
-        strategy_params, _ = run_optimisation(
+        strategy_params, _ = _run_optimisation_with_ui(
             data,
             "Pairs Trading",
             parameter_ranges,
@@ -574,12 +689,14 @@ def prepare_pairs_trading_strategy_without_optimisation(
               otherwise the initial strategy parameters.
     """
     ticker1, ticker2 = ticker
-    data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+    data = _cached_load_yfinance_data_two_tickers(
+        ticker1, ticker2, start_date, end_date
+    )
     ticker_display = f"{ticker1} vs. {ticker2}"
     _display_cointegration_result(data, "selected date range")
 
     if optimise:
-        strategy_params, _ = run_optimisation(
+        strategy_params, _ = _run_optimisation_with_ui(
             data,
             "Pairs Trading",
             strategy_params,
@@ -623,11 +740,11 @@ def prepare_single_ticker_strategy(
             - Optimised strategy parameters if optimise is True,
               otherwise the initial strategy parameters.
     """
-    data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+    data = _cached_load_yfinance_data_one_ticker(ticker, start_date, end_date)
     ticker_display = ticker
 
     if optimise and strategy_type != "Buy and Hold":
-        strategy_params, _ = run_optimisation(
+        strategy_params, _ = _run_optimisation_with_ui(
             data,
             strategy_type,
             strategy_params,
@@ -637,13 +754,18 @@ def prepare_single_ticker_strategy(
             walk_forward=walk_forward,
         )
     elif optimise and strategy_type == "Buy and Hold":
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
-        best_ticker, strategy_params, _ = optimise_buy_and_hold_ticker(
-            top_companies, start_date, end_date
-        )
+        top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
+        with _streamlit_progress() as progress_callback:
+            best_ticker, strategy_params, _ = optimise_buy_and_hold_ticker(
+                top_companies,
+                start_date,
+                end_date,
+                progress_callback=progress_callback,
+                status_callback=_display_status_message,
+            )
         ticker = best_ticker
         ticker_display = best_ticker
-        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+        data = _cached_load_yfinance_data_one_ticker(ticker, start_date, end_date)
 
     return data, ticker_display, strategy_params
 
@@ -791,10 +913,10 @@ def main():
                 walk_forward,
             )
         )
-        # Update company names with the selected pair
+        # Update company names with the selected pair.
         ticker1, ticker2 = ticker_display.split(" vs. ")
-        company_name1 = get_full_company_name(ticker1)
-        company_name2 = get_full_company_name(ticker2)
+        company_name1 = _cached_get_full_company_name(ticker1)
+        company_name2 = _cached_get_full_company_name(ticker2)
     elif strategy_type == "Pairs Trading":
         data, ticker_display, strategy_params = (
             prepare_pairs_trading_strategy_without_optimisation(
@@ -807,9 +929,9 @@ def main():
             )
         )
         ticker1, ticker2 = cast(tuple[str, str], ticker)
-        company_name1 = get_full_company_name(ticker1)
-        company_name2 = get_full_company_name(ticker2)
-    # Optimise the ticker for single ticker strategies if option is selected
+        company_name1 = _cached_get_full_company_name(ticker1)
+        company_name2 = _cached_get_full_company_name(ticker2)
+    # Optimise the ticker for single ticker strategies if option is selected.
     elif (
         strategy_type in ["Buy and Hold", "Mean Reversion", "Moving Average Crossover"]
         and auto_select_tickers
@@ -824,7 +946,7 @@ def main():
                 walk_forward,
             )
         )
-        company_name1 = get_full_company_name(ticker_display)
+        company_name1 = _cached_get_full_company_name(ticker_display)
     else:
         data, ticker_display, strategy_params = prepare_single_ticker_strategy(
             cast(str, ticker),
@@ -835,7 +957,7 @@ def main():
             optimise,
             walk_forward,
         )
-        company_name1 = get_full_company_name(ticker_display)
+        company_name1 = _cached_get_full_company_name(ticker_display)
 
     if data is None or data.is_empty():
         st.write("No data available for the selected ticker and date range")

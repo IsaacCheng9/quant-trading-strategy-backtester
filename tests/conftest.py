@@ -147,6 +147,14 @@ def mock_yfinance_functions(monkeypatch):
         mock_load_two_tickers,
     )
 
+    from quant_trading_strategy_backtester import app
+
+    # Clear Streamlit data caches so per-test monkeypatches never see stale data.
+    app._cached_load_yfinance_data_one_ticker.clear()
+    app._cached_load_yfinance_data_two_tickers.clear()
+    app._cached_get_top_sp500_companies.clear()
+    app._cached_get_full_company_name.clear()
+
 
 @pytest.fixture(autouse=True)
 def mock_yfinance_download(monkeypatch):

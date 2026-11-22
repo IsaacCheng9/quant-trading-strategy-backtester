@@ -13,6 +13,7 @@ from quant_trading_strategy_backtester.app import (
     _get_benchmark_date_range,
     _get_prior_date,
     _get_strategy_store,
+    _streamlit_progress,
 )
 from quant_trading_strategy_backtester.storage import (
     InMemoryStrategyStore,
@@ -212,3 +213,39 @@ def test_display_benchmark_comparison_passes_prior_date_for_validation(
     assert displayed_metrics[0]["Benchmark Total Return"] == pytest.approx(
         108.2016 / 100.0 - 1
     )
+
+
+def test_streamlit_progress_updates_and_clears_widgets(monkeypatch) -> None:
+    """Verify _streamlit_progress updates widgets and clears them on exit."""
+    events: list[tuple[str, object]] = []
+
+    class FakeProgressBar:
+        def progress(self, value: float) -> None:
+            events.append(("progress", value))
+
+        def empty(self) -> None:
+            events.append(("progress_empty", None))
+
+    class FakeStatusText:
+        def text(self, message: str) -> None:
+            events.append(("text", message))
+
+        def empty(self) -> None:
+            events.append(("text_empty", None))
+
+    monkeypatch.setattr(app.st, "progress", lambda _val: FakeProgressBar())
+    monkeypatch.setattr(app.st, "empty", lambda: FakeStatusText())
+
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        _streamlit_progress() as progress_cb,
+    ):
+        progress_cb(1, 2, "Halfway")
+        raise RuntimeError("boom")
+
+    assert events == [
+        ("text", "Halfway"),
+        ("progress", 0.5),
+        ("progress_empty", None),
+        ("text_empty", None),
+    ]
