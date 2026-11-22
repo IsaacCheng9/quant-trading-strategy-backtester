@@ -288,67 +288,70 @@ def plot_pairs_spread(
     st.plotly_chart(fig)
 
 
-def display_returns_by_month(results: pl.DataFrame) -> None:
+def calculate_monthly_returns(results: pl.DataFrame) -> pl.DataFrame:
+    """Calculate compounded monthly and rolling returns from backtest results.
+
+    Args:
+        results: The backtest results DataFrame containing Date and
+            strategy_returns columns.
+
+    Returns:
+        A DataFrame with Month (YYYY-MM), Monthly Return (%), and
+        Rolling Return (%) columns sorted chronologically.
     """
-    Displays a table showing returns data for each month in the backtest,
-    including monthly returns and rolling (cumulative) returns.
+    if results.is_empty():
+        return pl.DataFrame(
+            schema={
+                "Month (YYYY-MM)": pl.String,
+                "Monthly Return (%)": pl.Float64,
+                "Rolling Return (%)": pl.Float64,
+            }
+        )
+
+    return (
+        results.lazy()
+        .sort("Date")
+        .group_by(
+            pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)"),
+            maintain_order=True,
+        )
+        .agg(
+            (1 + pl.col("strategy_returns").cast(pl.Float64))
+            .product()
+            .alias("monthly_factor")
+        )
+        .with_columns(
+            [
+                ((pl.col("monthly_factor") - 1) * 100)
+                .round(2)
+                .alias("Monthly Return (%)"),
+                ((pl.col("monthly_factor").cum_prod() - 1) * 100)
+                .round(2)
+                .alias("Rolling Return (%)"),
+            ]
+        )
+        .select(["Month (YYYY-MM)", "Monthly Return (%)", "Rolling Return (%)"])
+        .collect()
+    )
+
+
+def display_returns_by_month(results: pl.DataFrame) -> None:
+    """Display monthly and rolling returns for each month in the backtest.
 
     Args:
         results: The backtest results DataFrame.
     """
     st.subheader("Returns by Month")
-    if results.is_empty():
+    monthly_returns = calculate_monthly_returns(results)
+    if monthly_returns.is_empty():
         st.write("No data available for monthly performance calculation.")
         return
 
-    monthly_returns: pl.DataFrame = (
-        results.lazy()
-        .with_columns(pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)"))
-        .group_by("Month (YYYY-MM)")
-        .agg(
-            [
-                pl.col("equity_curve").first().alias("start_value"),
-                pl.col("equity_curve").last().alias("end_value"),
-            ]
-        )
-        .with_columns(
-            (
-                (pl.col("end_value") - pl.col("start_value"))
-                / pl.col("start_value")
-                * 100
-            ).alias("Monthly Return (%)")
-        )
-        .sort("Month (YYYY-MM)")
-        .collect()
+    st.dataframe(
+        monthly_returns.to_pandas(),
+        width="content",
+        hide_index=True,
     )
-
-    if monthly_returns.is_empty():
-        st.write("No monthly data available after aggregation.")
-    else:
-        initial_start_value = monthly_returns["start_value"][0]
-        monthly_returns: pl.DataFrame = (
-            monthly_returns.lazy()
-            .with_columns(
-                ((pl.col("end_value") / initial_start_value - 1) * 100).alias(
-                    "Rolling Return (%)"
-                )
-            )
-            .with_columns(
-                [
-                    pl.col("Monthly Return (%)").round(2),
-                    pl.col("Rolling Return (%)").round(2),
-                ]
-            )
-            .collect()
-        )
-        # Display the table
-        st.dataframe(
-            monthly_returns.select(
-                ["Month (YYYY-MM)", "Monthly Return (%)", "Rolling Return (%)"]
-            ).to_pandas(),
-            width="content",
-            hide_index=True,
-        )
 
 
 def display_trade_ledger(results: pl.DataFrame) -> None:
