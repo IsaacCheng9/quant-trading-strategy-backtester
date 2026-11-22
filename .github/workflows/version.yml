@@ -37,13 +37,13 @@ jobs:
 
       - name: Set up Python
         if: steps.check_head.outputs.skip != 'true'
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
       - name: Install uv
         if: steps.check_head.outputs.skip != 'true'
-        uses: astral-sh/setup-uv@main
+        uses: astral-sh/setup-uv@v5
 
       - name: Install commitizen
         if: steps.check_head.outputs.skip != 'true'
@@ -94,8 +94,7 @@ jobs:
             git commit -m "bump: version $OLD_VERSION → $NEW_VERSION"
             git tag "$NEW_VERSION"
 
-            if git push origin HEAD:main; then
-              git push origin "refs/tags/$NEW_VERSION"
+            if git push --atomic origin HEAD:main "refs/tags/$NEW_VERSION"; then
               exit 0
             fi
 
