@@ -7,16 +7,17 @@ designed to work with the strategy templates defined in a different module in
 this repository.
 """
 
-import json
 import math
-import platform
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from typing import Any, cast
 
 import polars as pl
-import streamlit as st
 
-from quant_trading_strategy_backtester.models import Session, StrategyModel
+from quant_trading_strategy_backtester.storage import (
+    SQLiteStrategyStore,
+    StrategyRecord,
+    StrategyStore,
+)
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 TRADING_DAYS_PER_YEAR = 252
@@ -39,18 +40,6 @@ TRADE_LEDGER_SCHEMA = {
     "Leg 2 Weight": pl.Float64,
     "Z-Score": pl.Float64,
 }
-
-
-def is_running_locally() -> bool:
-    """
-    Determines if the app is running locally or on Streamlit Cloud by checking
-    platform characteristics. platform.processor() returns nothing on Streamlit
-    Cloud but returns a value locally.
-
-    Returns:
-        bool: True if running locally, False if running on Streamlit Cloud
-    """
-    return bool(platform.processor())
 
 
 def build_trade_ledger(results: pl.DataFrame) -> pl.DataFrame:
@@ -301,7 +290,6 @@ class Backtester:
         initial_capital: float = 100000.0,
         transaction_cost_bps: float = 5.0,
         slippage_bps: float = 3.0,
-        session=None,
         tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data
@@ -310,7 +298,6 @@ class Backtester:
         self.transaction_cost_bps = transaction_cost_bps
         self.slippage_bps = slippage_bps
         self.results: None | pl.DataFrame = None
-        self.session = session or Session()
         self.tickers = tickers
 
     def run(self) -> pl.DataFrame:
@@ -579,10 +566,14 @@ class Backtester:
             "Total Turnover": total_turnover,
         }
 
-    def save_results(self) -> None:
-        """
-        Saves the strategy and its backtest results to either the local database
-        or session state, depending on the environment.
+    def build_strategy_record(self) -> StrategyRecord:
+        """Build a persistence record from the completed backtest results.
+
+        Returns:
+            A StrategyRecord populated with strategy metadata and metrics.
+
+        Raises:
+            ValueError: If run() has not been called yet.
         """
         metrics = self.get_performance_metrics()
         if metrics is None:
@@ -591,7 +582,6 @@ class Backtester:
         strategy_params = self.strategy.get_parameters()
         strategy_name = self.strategy.__class__.__name__
 
-        # Determine start and end dates
         start_date_row = self.data.select(
             pl.col("Date").dt.year().alias("year"),
             pl.col("Date").dt.month().alias("month"),
@@ -605,59 +595,30 @@ class Backtester:
 
         start_date = date(start_date_row[0], start_date_row[1], start_date_row[2])
         end_date = date(end_date_row[0], end_date_row[1], end_date_row[2])
+        sharpe_ratio = metrics["Sharpe Ratio"]
+        normalised_sharpe = sharpe_ratio if math.isfinite(sharpe_ratio) else None
 
-        if is_running_locally():
-            try:
-                # Check if a strategy with the same name, parameters, and date
-                # range already exists
-                existing_strategy = (
-                    self.session.query(StrategyModel)
-                    .filter_by(
-                        name=strategy_name,
-                        parameters=json.dumps(strategy_params),
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                    .first()
-                )
+        return StrategyRecord(
+            name=strategy_name,
+            parameters=strategy_params,
+            total_return=metrics["Total Return"],
+            sharpe_ratio=normalised_sharpe,
+            max_drawdown=metrics["Max Drawdown"],
+            tickers=self.tickers,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
-                if existing_strategy is None:
-                    new_strategy = StrategyModel(
-                        name=strategy_name,
-                        parameters=json.dumps(strategy_params),
-                        total_return=metrics["Total Return"],
-                        sharpe_ratio=metrics["Sharpe Ratio"],
-                        max_drawdown=metrics["Max Drawdown"],
-                        tickers=json.dumps(self.tickers),
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                    self.session.add(new_strategy)
-                    self.session.commit()
-                    print(f"Strategy {strategy_name} saved successfully.")
-                else:
-                    print(
-                        f"Strategy {strategy_name} with same parameters already exists. Skipping save."
-                    )
-            except Exception as exc:
-                self.session.rollback()
-                raise ValueError(f"Failed to save strategy results: {exc!s}") from exc
-        else:
-            # Use Streamlit session state for cloud deployment
-            if "strategy_results" not in st.session_state:
-                st.session_state.strategy_results = []
+    def save_results(self, store: StrategyStore | None = None) -> bool:
+        """Persist the strategy and its backtest results to a store.
 
-            st.session_state.strategy_results.append(
-                {
-                    "date_created": datetime.now(UTC),
-                    "name": strategy_name,
-                    "parameters": strategy_params,
-                    "total_return": metrics["Total Return"],
-                    "sharpe_ratio": metrics["Sharpe Ratio"],
-                    "max_drawdown": metrics["Max Drawdown"],
-                    "tickers": self.tickers,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                }
-            )
-            print(f"Strategy {strategy_name} saved to session state.")
+        Args:
+            store: Target strategy store. Defaults to a lazy
+                SQLiteStrategyStore.
+
+        Returns:
+            True if the record was saved, False if skipped as a duplicate.
+        """
+        record = self.build_strategy_record()
+        target_store = store if store is not None else SQLiteStrategyStore()
+        return target_store.save(record)

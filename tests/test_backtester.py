@@ -273,33 +273,27 @@ def test_backtester_with_insufficient_data_all_strategies(
     assert len(results) == len(insufficient_data)
 
 
-def test_backtester_save_results(mock_db_session, mock_polars_data):
+def test_backtester_save_results(sqlite_store, session_factory, mock_polars_data):
+    """Verify Backtester.save_results persists structured strategy results."""
     strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
-    backtester = Backtester(mock_polars_data, strategy, session=mock_db_session)
+    backtester = Backtester(mock_polars_data, strategy, tickers="AAPL")
     backtester.run()
-    backtester.save_results()
 
-    # Print metrics for debugging
-    metrics = backtester.get_performance_metrics()
-    print("Metrics before saving:", metrics)
+    saved = backtester.save_results(store=sqlite_store)
 
-    # Verify that the results were saved to the mocked database
-    saved_strategy = (
-        mock_db_session.query(StrategyModel)
-        .filter_by(name="MovingAverageCrossoverStrategy")
-        .first()
-    )
+    assert saved is True
+    with session_factory() as session:
+        saved_strategy = (
+            session.query(StrategyModel)
+            .filter_by(name="MovingAverageCrossoverStrategy")
+            .first()
+        )
 
     assert saved_strategy is not None
-    print("Saved strategy:", saved_strategy.__dict__)
-    assert saved_strategy.parameters == '{"short_window": 5, "long_window": 20}'
+    assert saved_strategy.parameters == {"long_window": 20, "short_window": 5}
+    assert saved_strategy.tickers == "AAPL"
     assert saved_strategy.total_return is not None
-
-    # Check if sharpe_ratio is either NaN or None
-    assert saved_strategy.sharpe_ratio is None or math.isnan(
-        saved_strategy.sharpe_ratio
-    )
-
+    assert saved_strategy.sharpe_ratio is None
     assert saved_strategy.max_drawdown is not None
 
 
