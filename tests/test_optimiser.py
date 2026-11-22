@@ -15,6 +15,7 @@ from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
     prepare_single_ticker_strategy_with_optimisation,
 )
+from quant_trading_strategy_backtester.backtester import TRADING_DAYS_PER_YEAR
 from quant_trading_strategy_backtester.cointegration import CointegrationResult
 from quant_trading_strategy_backtester.optimiser import (
     _split_data,
@@ -1126,6 +1127,53 @@ def test_evaluate_validation_period_preserves_rolling_context() -> None:
     )
     assert contextual_metrics["Total Return"] > isolated_metrics["Total Return"]
     assert isolated_results["signal"].to_list()[:2] == [0.0, 0.0]
+
+
+def test_evaluate_validation_period_uses_full_row_count_for_calmar() -> None:
+    """Verify validation Calmar counts day 0 when prior context exists."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
+    closes = [100.0, 102.0, 104.0, 106.0, 108.0, 110.0, 115.0, 105.0, 112.0, 120.0]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+    validation_data = data[6:]
+
+    results, metrics = evaluate_validation_period(
+        data,
+        validation_data,
+        "Buy and Hold",
+        {},
+        "TEST",
+    )
+
+    total_return = metrics["Total Return"]
+    max_drawdown = abs(metrics["Max Drawdown"])
+    assert len(results) == 4
+    expected_calmar = (
+        (1 + total_return) ** (TRADING_DAYS_PER_YEAR / len(results)) - 1
+    ) / max_drawdown
+    assert metrics["Calmar Ratio"] == pytest.approx(expected_calmar)
+
+
+def test_evaluate_validation_period_cold_start_uses_n_minus_one_for_calmar() -> None:
+    """Verify same-start validation falls back to n - 1 Calmar periods."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(5)]
+    closes = [100.0, 105.0, 95.0, 102.0, 110.0]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+
+    results, metrics = evaluate_validation_period(
+        data,
+        data,
+        "Buy and Hold",
+        {},
+        "TEST",
+    )
+
+    total_return = metrics["Total Return"]
+    max_drawdown = abs(metrics["Max Drawdown"])
+    assert len(results) == 5
+    expected_calmar = (
+        (1 + total_return) ** (TRADING_DAYS_PER_YEAR / (len(results) - 1)) - 1
+    ) / max_drawdown
+    assert metrics["Calmar Ratio"] == pytest.approx(expected_calmar)
 
 
 def test_optimise_strategy_params_returns_test_metrics(monkeypatch):

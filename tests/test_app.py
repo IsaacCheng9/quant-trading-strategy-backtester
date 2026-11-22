@@ -8,8 +8,10 @@ import pytest
 from quant_trading_strategy_backtester import app
 from quant_trading_strategy_backtester.app import (
     _build_save_key,
+    _display_benchmark_comparison,
     _format_historical_sharpe,
     _get_benchmark_date_range,
+    _get_prior_date,
     _get_strategy_store,
 )
 from quant_trading_strategy_backtester.storage import (
@@ -124,3 +126,89 @@ def test_get_strategy_store_falls_back_to_in_memory_when_cwd_read_only(
 
     assert isinstance(store, InMemoryStrategyStore)
     assert "strategy_results" in fake_session_state
+
+
+def test_get_benchmark_date_range_starts_from_prior_date() -> None:
+    """Verify benchmark loading starts on prior_date for validation slices."""
+    validation_data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 6),
+                datetime.date(2020, 1, 7),
+            ],
+            "Close": [101.0, 102.0],
+        }
+    )
+
+    start_date, end_date = _get_benchmark_date_range(
+        validation_data,
+        prior_date=datetime.date(2020, 1, 3),
+    )
+
+    assert start_date == datetime.date(2020, 1, 3)
+    assert end_date == datetime.date(2020, 1, 8)
+
+
+def test_get_prior_date_returns_previous_date_for_validation_slice() -> None:
+    """Verify _get_prior_date finds the last date strictly before a slice."""
+    dates = [
+        datetime.datetime(2020, 1, 1, 0, 0, tzinfo=datetime.UTC),
+        datetime.datetime(2020, 1, 2, 0, 0, tzinfo=datetime.UTC),
+        datetime.datetime(2020, 1, 3, 0, 0, tzinfo=datetime.UTC),
+        datetime.datetime(2020, 1, 6, 0, 0, tzinfo=datetime.UTC),
+    ]
+    full_data = pl.DataFrame({"Date": dates, "Close": [100.0, 101.0, 102.0, 103.0]})
+    validation_slice = full_data[2:]
+
+    assert _get_prior_date(full_data, validation_slice) == dates[1]
+    assert _get_prior_date(full_data, full_data) is None
+
+
+def test_display_benchmark_comparison_passes_prior_date_for_validation(
+    monkeypatch,
+) -> None:
+    """Verify benchmark comparison fetches and aligns from prior_date."""
+    dates = [
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 2),
+        datetime.date(2020, 1, 3),
+        datetime.date(2020, 1, 4),
+    ]
+    full_data = pl.DataFrame({"Date": dates, "Close": [100.0, 102.0, 104.0, 106.0]})
+    validation_data = full_data[1:]
+    results = pl.DataFrame({"Date": dates[1:], "strategy_returns": [0.02, 0.01, 0.03]})
+
+    loaded_range: list[tuple[datetime.date, datetime.date]] = []
+    displayed_metrics: list[dict[str, float]] = []
+
+    def mock_load_benchmark(
+        ticker: str, start_date: datetime.date, end_date: datetime.date
+    ) -> pl.DataFrame:
+        loaded_range.append((start_date, end_date))
+        return pl.DataFrame(
+            {
+                "Date": dates,
+                "Close": [100.0, 104.0, 106.08, 108.2016],
+            }
+        )
+
+    def mock_display_metrics(metrics: dict[str, float], ticker: str) -> None:
+        displayed_metrics.append(metrics)
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
+        mock_load_benchmark,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.display_benchmark_metrics",
+        mock_display_metrics,
+    )
+
+    _display_benchmark_comparison(results, validation_data, full_data=full_data)
+
+    assert loaded_range == [(datetime.date(2020, 1, 1), datetime.date(2020, 1, 5))]
+    assert len(displayed_metrics) == 1
+    assert displayed_metrics[0]["Benchmark Observations"] == 3
+    assert displayed_metrics[0]["Benchmark Total Return"] == pytest.approx(
+        108.2016 / 100.0 - 1
+    )
