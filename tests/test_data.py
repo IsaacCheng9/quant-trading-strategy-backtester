@@ -3,6 +3,8 @@ Contains tests for data fetching functions.
 """
 
 import datetime
+import subprocess
+import sys
 
 import pandas as pd
 import polars as pl
@@ -26,7 +28,6 @@ def test_load_yfinance_data_one_ticker(
         return data.drop(columns=["Adj Close"]).set_index("Date")
 
     monkeypatch.setattr("yfinance.download", mock_download)
-    load_yfinance_data_one_ticker.clear()
 
     data = load_yfinance_data_one_ticker(
         "AAPL", datetime.date(2020, 1, 1), datetime.date(2020, 1, 31)
@@ -64,7 +65,6 @@ def test_load_yfinance_data_two_tickers(
         return multi_index_data
 
     monkeypatch.setattr("yfinance.download", mock_download)
-    load_yfinance_data_two_tickers.clear()
 
     data = load_yfinance_data_two_tickers(
         "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 31)
@@ -92,7 +92,6 @@ def test_load_yfinance_data_two_tickers_preserves_requested_order(
         )
 
     monkeypatch.setattr("yfinance.download", mock_download)
-    load_yfinance_data_two_tickers.clear()
 
     data = load_yfinance_data_two_tickers(
         "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 3)
@@ -116,7 +115,6 @@ def test_load_yfinance_data_two_tickers_handles_ticker_first_columns(
         )
 
     monkeypatch.setattr("yfinance.download", mock_download)
-    load_yfinance_data_two_tickers.clear()
 
     data = load_yfinance_data_two_tickers(
         "AAPL", "MSFT", datetime.date(2020, 1, 1), datetime.date(2020, 1, 3)
@@ -135,7 +133,6 @@ def test_load_yfinance_data_two_tickers_rejects_flat_response(
         return pd.DataFrame({"Close": [100.0, 101.0, 102.0]}, index=dates)
 
     monkeypatch.setattr("yfinance.download", mock_download)
-    load_yfinance_data_two_tickers.clear()
 
     with pytest.raises(ValueError, match="Expected MultiIndex columns"):
         load_yfinance_data_two_tickers(
@@ -157,7 +154,6 @@ def test_load_yfinance_data_two_tickers_requires_both_close_columns(
         )
 
     monkeypatch.setattr("yfinance.download", mock_download)
-    load_yfinance_data_two_tickers.clear()
 
     with pytest.raises(ValueError, match="Expected exactly one Close column for MSFT"):
         load_yfinance_data_two_tickers(
@@ -235,3 +231,32 @@ def test_is_same_company_check_failure(monkeypatch):
 
     monkeypatch.setattr("yfinance.Ticker", mock_ticker_info_error)
     assert is_same_company("ERROR1", "ERROR2") is False
+
+
+def test_importing_data_does_not_import_streamlit_or_warn() -> None:
+    """Verify importing data outside Streamlit does not load it or warn."""
+    script = (
+        "import logging, sys, warnings\n"
+        "log_records = []\n"
+        "class CaptureHandler(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        if record.levelno >= logging.WARNING:\n"
+        "            log_records.append(record.getMessage())\n"
+        "logging.getLogger().addHandler(CaptureHandler())\n"
+        "with warnings.catch_warnings(record=True) as caught:\n"
+        "    warnings.simplefilter('always')\n"
+        "    import quant_trading_strategy_backtester.data\n"
+        "assert 'streamlit' not in sys.modules, 'streamlit was imported'\n"
+        "assert not caught, f'Unexpected warnings: {caught}'\n"
+        "assert not log_records, f'Unexpected log warnings: {log_records}'\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "No runtime found" not in result.stderr
+    assert "streamlit" not in result.stderr.lower()

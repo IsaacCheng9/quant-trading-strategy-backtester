@@ -4,6 +4,8 @@ Contains tests for optimisation functions.
 
 import datetime
 import math
+import subprocess
+import sys
 from typing import Any
 
 import polars as pl
@@ -1430,3 +1432,278 @@ def test_optimise_buy_and_hold_ticker_uses_train_test_split(monkeypatch):
     assert train_size + test_size == 100
     assert train_size == 70  # 70% of 100
     assert test_size == 30  # 30% of 100
+
+
+def test_importing_optimiser_does_not_import_streamlit_or_warn() -> None:
+    """Verify importing optimiser does not load streamlit or emit warnings."""
+    isolated_script = (
+        "import logging, sys, types, warnings\n"
+        "log_records = []\n"
+        "class CaptureHandler(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        if record.levelno >= logging.WARNING:\n"
+        "            log_records.append(record.getMessage())\n"
+        "logging.getLogger().addHandler(CaptureHandler())\n"
+        "stub = types.ModuleType('quant_trading_strategy_backtester.backtester')\n"
+        "stub.Backtester = object\n"
+        "sys.modules['quant_trading_strategy_backtester.backtester'] = stub\n"
+        "with warnings.catch_warnings(record=True) as caught:\n"
+        "    warnings.simplefilter('always')\n"
+        "    import quant_trading_strategy_backtester.optimiser\n"
+        "assert 'streamlit' not in sys.modules, 'streamlit was imported'\n"
+        "assert not caught, f'Unexpected warnings: {caught}'\n"
+        "assert not log_records, f'Unexpected log warnings: {log_records}'\n"
+    )
+    isolated_result = subprocess.run(
+        [sys.executable, "-c", isolated_script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert isolated_result.returncode == 0, isolated_result.stderr
+    assert "No runtime found" not in isolated_result.stderr
+    assert "streamlit" not in isolated_result.stderr.lower()
+
+    direct_script = (
+        "import logging, warnings\n"
+        "log_records = []\n"
+        "class CaptureHandler(logging.Handler):\n"
+        "    def emit(self, record):\n"
+        "        if record.levelno >= logging.WARNING:\n"
+        "            log_records.append(record.getMessage())\n"
+        "logging.getLogger().addHandler(CaptureHandler())\n"
+        "with warnings.catch_warnings(record=True) as caught:\n"
+        "    warnings.simplefilter('always')\n"
+        "    import quant_trading_strategy_backtester.optimiser\n"
+        "assert not caught, f'Unexpected warnings: {caught}'\n"
+        "assert not log_records, f'Unexpected log warnings: {log_records}'\n"
+    )
+    direct_result = subprocess.run(
+        [sys.executable, "-c", direct_script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert direct_result.returncode == 0, direct_result.stderr
+    assert "No runtime found" not in direct_result.stderr
+
+
+def test_optimise_strategy_params_invokes_callbacks(monkeypatch) -> None:
+    """Verify parameter optimisation invokes progress and status callbacks."""
+    data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
+            "Close": [100.0 + i for i in range(21)],
+        }
+    )
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        return None, {
+            "Sharpe Ratio": float(params["short_window"]),
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest", mock_run_backtest
+    )
+
+    progress_events: list[tuple[int, int, str]] = []
+    status_messages: list[str] = []
+
+    optimise_strategy_params(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [5, 10, 15], "long_window": [20]},
+        "AAPL",
+        progress_callback=lambda current, total, msg: progress_events.append(
+            (current, total, msg)
+        ),
+        status_callback=status_messages.append,
+    )
+
+    assert progress_events == [
+        (1, 3, "Evaluating parameter combination 1 / 3"),
+        (2, 3, "Evaluating parameter combination 2 / 3"),
+        (3, 3, "Evaluating parameter combination 3 / 3"),
+    ]
+    assert len(status_messages) == 1
+    assert "3 valid combinations" in status_messages[0]
+    assert "21 training rows" in status_messages[0]
+
+
+def test_optimise_buy_and_hold_ticker_invokes_callbacks(monkeypatch) -> None:
+    """Verify buy-and-hold ticker selection reports progress and status."""
+    top_companies = [("AAPL", 2.0), ("MSFT", 1.0)]
+    mock_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 32)],
+            "Close": [100.0 + i for i in range(31)],
+        }
+    )
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: mock_data,
+    )
+
+    progress_events: list[tuple[int, int, str]] = []
+    status_messages: list[str] = []
+
+    optimise_buy_and_hold_ticker(
+        top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 31),
+        progress_callback=lambda current, total, msg: progress_events.append(
+            (current, total, msg)
+        ),
+        status_callback=status_messages.append,
+    )
+
+    assert progress_events == [
+        (1, 2, "Evaluating ticker 1 / 2: AAPL"),
+        (2, 2, "Evaluating ticker 2 / 2: MSFT"),
+    ]
+    assert len(status_messages) == 1
+    assert "evaluated 2 of 2 candidates" in status_messages[0]
+
+
+def test_optimise_single_ticker_strategy_ticker_invokes_callbacks(
+    monkeypatch,
+) -> None:
+    """Verify single-ticker selection reports progress and status."""
+    top_companies = [("AAPL", 2.0), ("GOOGL", 1.5), ("MSFT", 1.0)]
+    mock_data = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, i) for i in range(1, 32)],
+            "Close": [100.0 + i for i in range(31)],
+        }
+    )
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: mock_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        lambda *_args, **_kwargs: (None, {"Sharpe Ratio": 1.2}),
+    )
+
+    progress_events: list[tuple[int, int, str]] = []
+    status_messages: list[str] = []
+
+    optimise_single_ticker_strategy_ticker(
+        top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 31),
+        "Mean Reversion",
+        {"window": 10, "std_dev": 2.0},
+        progress_callback=lambda current, total, msg: progress_events.append(
+            (current, total, msg)
+        ),
+        status_callback=status_messages.append,
+    )
+
+    assert progress_events == [
+        (1, 3, "Evaluating ticker 1 / 3: AAPL"),
+        (2, 3, "Evaluating ticker 2 / 3: GOOGL"),
+        (3, 3, "Evaluating ticker 3 / 3: MSFT"),
+    ]
+    assert len(status_messages) == 1
+    assert "evaluated 3 of 3 candidates" in status_messages[0]
+
+
+def test_optimise_pairs_trading_tickers_invokes_callbacks(monkeypatch) -> None:
+    """Verify pairs ticker selection reports progress and status messages."""
+    top_companies = [("AAPL", 3.0), ("GOOGL", 2.0), ("MSFT", 1.0)]
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(20)]
+    mock_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close_1": [100.0 + i * 0.1 for i in range(20)],
+            "Close_2": [200.0 + i * 0.2 for i in range(20)],
+        }
+    )
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
+        lambda *_args, **_kwargs: mock_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.is_same_company",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_args, **_kwargs: _cointegration_result(True),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        lambda *_args, **_kwargs: (None, {"Sharpe Ratio": 1.5}),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        lambda *_args, **_kwargs: (pl.DataFrame(), {"Sharpe Ratio": 1.1}),
+    )
+
+    progress_events: list[tuple[int, int, str]] = []
+    status_messages: list[str] = []
+
+    optimise_pairs_trading_tickers(
+        top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 20),
+        {"window": [10], "entry_z_score": [2.0], "exit_z_score": [0.5]},
+        optimise=True,
+        progress_callback=lambda current, total, msg: progress_events.append(
+            (current, total, msg)
+        ),
+        status_callback=status_messages.append,
+    )
+
+    assert [(c, t) for c, t, _ in progress_events] == [(1, 3), (2, 3), (3, 3)]
+    assert "AAPL vs. GOOGL" in progress_events[0][2]
+    assert "AAPL vs. MSFT" in progress_events[1][2]
+    assert "GOOGL vs. MSFT" in progress_events[2][2]
+    assert len(status_messages) == 2
+    assert "evaluated 3 of 3 candidate pairs" in status_messages[0]
+    assert "rejected 0" in status_messages[0]
+    assert "1 valid combinations per cointegrated pair" in status_messages[1]
+
+
+def test_run_optimisation_walk_forward_invokes_callbacks() -> None:
+    """Verify run_optimisation forwards progress, status, and fold hooks."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(60)]
+    data = pl.DataFrame({"Date": dates, "Close": [100.0 + i * 0.5 for i in range(60)]})
+
+    progress_events: list[tuple[int, int, str]] = []
+    status_messages: list[str] = []
+    received_folds: list[list[dict[str, Any]]] = []
+
+    run_optimisation(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [3, 5], "long_window": [10]},
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 3, 1),
+        "TEST",
+        walk_forward=True,
+        progress_callback=lambda current, total, msg: progress_events.append(
+            (current, total, msg)
+        ),
+        status_callback=status_messages.append,
+        fold_results_callback=received_folds.append,
+    )
+
+    assert len(progress_events) == 10
+    assert progress_events[0][:2] == (1, 10)
+    assert progress_events[-1][:2] == (10, 10)
+    assert len(status_messages) == 1
+    assert (
+        "2 valid combinations across 5 expanding walk-forward folds"
+        in (status_messages[0])
+    )
+    assert len(received_folds) == 1
+    assert len(received_folds[0]) == 5

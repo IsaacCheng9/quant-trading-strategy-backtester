@@ -3,6 +3,7 @@ Contains functions to display backtest results using Streamlit and Plotly.
 """
 
 import math
+from typing import Any
 
 import plotly.graph_objects as go
 import polars as pl
@@ -425,3 +426,28 @@ def display_trade_ledger(results: pl.DataFrame) -> None:
         width="stretch",
         hide_index=True,
     )
+
+
+def display_walk_forward_results(fold_results: list[dict[str, Any]]) -> None:
+    """Display per-fold walk-forward validation results in the Streamlit UI.
+
+    Args:
+        fold_results: Per-fold result dictionaries from
+            walk_forward_optimise().
+    """
+    with st.expander("Walk-Forward Validation Details"):
+        for fold in fold_results:
+            st.subheader(f"Fold {fold['fold']}")
+            st.write(
+                f"Train: {fold['train_rows']} rows, Test: {fold['test_rows']} rows"
+            )
+            st.write(f"Best params: {fold['params']}")
+            col1, col2 = st.columns(2)
+            col1.metric(
+                "In-Sample Sharpe",
+                _format_metric(fold["in_sample_sharpe"], ".4f"),
+            )
+            col2.metric(
+                "Out-of-Sample Sharpe",
+                _format_metric(fold["oos_metrics"]["Sharpe Ratio"], ".4f"),
+            )

@@ -10,13 +10,11 @@ from typing import cast
 import pandas as pd
 import polars as pl
 import requests
-import streamlit as st
 import yfinance as yf
 
 from quant_trading_strategy_backtester.utils import logger
 
 
-@st.cache_data
 def load_yfinance_data_one_ticker(
     ticker: str, start_date: datetime.date, end_date: datetime.date
 ) -> pl.DataFrame:
@@ -42,7 +40,6 @@ def load_yfinance_data_one_ticker(
     return pl.from_pandas(data)
 
 
-@st.cache_data
 def load_yfinance_data_two_tickers(
     ticker1: str, ticker2: str, start_date: datetime.date, end_date: datetime.date
 ) -> pl.DataFrame:
@@ -133,7 +130,6 @@ def _empty_two_ticker_data() -> pl.DataFrame:
     )
 
 
-@st.cache_data
 def get_ticker_market_cap(ticker: str) -> tuple[str, float | None]:
     """
     Fetch market cap data for a single ticker from Yahoo Finance.
@@ -153,7 +149,6 @@ def get_ticker_market_cap(ticker: str) -> tuple[str, float | None]:
     return ticker, market_cap
 
 
-@st.cache_data
 def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     """
     Fetches the top X companies in the S&P 500 index by market cap.
@@ -199,7 +194,6 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     return top_companies
 
 
-@st.cache_data
 def get_full_company_name(ticker: str) -> str | None:
     """
     Fetches the full company name for a given ticker symbol.
@@ -218,7 +212,6 @@ def get_full_company_name(ticker: str) -> str | None:
         return None
 
 
-@st.cache_data
 def is_same_company(ticker1: str, ticker2: str) -> bool:
     """
     Determines if two tickers represent the same underlying company.

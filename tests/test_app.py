@@ -5,7 +5,7 @@ import datetime
 import polars as pl
 import pytest
 
-from quant_trading_strategy_backtester import app
+from quant_trading_strategy_backtester import app, visualisation
 from quant_trading_strategy_backtester.app import (
     _build_save_key,
     _display_benchmark_comparison,
@@ -13,6 +13,7 @@ from quant_trading_strategy_backtester.app import (
     _get_benchmark_date_range,
     _get_prior_date,
     _get_strategy_store,
+    _streamlit_progress,
 )
 from quant_trading_strategy_backtester.storage import (
     InMemoryStrategyStore,
@@ -212,3 +213,138 @@ def test_display_benchmark_comparison_passes_prior_date_for_validation(
     assert displayed_metrics[0]["Benchmark Total Return"] == pytest.approx(
         108.2016 / 100.0 - 1
     )
+
+
+def test_streamlit_progress_updates_and_clears_widgets(monkeypatch) -> None:
+    """Verify _streamlit_progress updates widgets and clears them on exit."""
+    events: list[tuple[str, object]] = []
+
+    class FakeProgressBar:
+        def progress(self, value: float) -> None:
+            events.append(("progress", value))
+
+        def empty(self) -> None:
+            events.append(("progress_empty", None))
+
+    class FakeStatusText:
+        def text(self, message: str) -> None:
+            events.append(("text", message))
+
+        def empty(self) -> None:
+            events.append(("text_empty", None))
+
+    monkeypatch.setattr(app.st, "progress", lambda _val: FakeProgressBar())
+    monkeypatch.setattr(app.st, "empty", lambda: FakeStatusText())
+
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        _streamlit_progress() as progress_cb,
+    ):
+        progress_cb(1, 2, "Halfway")
+        raise RuntimeError("boom")
+
+    assert events == [
+        ("text", "Halfway"),
+        ("progress", 0.5),
+        ("progress_empty", None),
+        ("text_empty", None),
+    ]
+
+
+def test_display_walk_forward_results_formats_non_finite_sharpes_as_na(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify display_walk_forward_results renders NaN and inf as N/A."""
+    rendered_metrics: list[tuple[str, str]] = []
+
+    class FakeExpander:
+        def __enter__(self) -> None:
+            return None
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+    class FakeCol:
+        def metric(self, label: str, value: str) -> None:
+            rendered_metrics.append((label, value))
+
+    monkeypatch.setattr(visualisation.st, "expander", lambda _label: FakeExpander())
+    monkeypatch.setattr(visualisation.st, "subheader", lambda *_a, **_k: None)
+    monkeypatch.setattr(visualisation.st, "write", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        visualisation.st,
+        "columns",
+        lambda _n: (FakeCol(), FakeCol()),
+    )
+
+    visualisation.display_walk_forward_results(
+        [
+            {
+                "fold": 1,
+                "train_rows": 20,
+                "test_rows": 10,
+                "params": {"window": 5},
+                "in_sample_sharpe": 1.23456,
+                "oos_metrics": {"Sharpe Ratio": float("nan")},
+            },
+            {
+                "fold": 2,
+                "train_rows": 30,
+                "test_rows": 10,
+                "params": {"window": 10},
+                "in_sample_sharpe": float("inf"),
+                "oos_metrics": {"Sharpe Ratio": -0.5},
+            },
+        ]
+    )
+
+    assert rendered_metrics == [
+        ("In-Sample Sharpe", "1.2346"),
+        ("Out-of-Sample Sharpe", "N/A"),
+        ("In-Sample Sharpe", "N/A"),
+        ("Out-of-Sample Sharpe", "-0.5000"),
+    ]
+
+
+def test_app_injects_cached_loaders_into_optimiser(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify app preparation injects Streamlit cached loaders into optimiser."""
+    captured: dict[str, object] = {}
+
+    def fake_optimise_pairs(*args: object, **kwargs: object):
+        captured["load_two_tickers"] = kwargs.get("load_two_tickers")
+        captured["same_company_check"] = kwargs.get("same_company_check")
+        return (
+            ("AAPL", "MSFT"),
+            {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+            {},
+        )
+
+    monkeypatch.setattr(
+        app,
+        "_cached_get_top_sp500_companies",
+        lambda _n: [("AAPL", 2.0), ("MSFT", 1.0)],
+    )
+    monkeypatch.setattr(app, "optimise_pairs_trading_tickers", fake_optimise_pairs)
+    monkeypatch.setattr(
+        app,
+        "_cached_load_yfinance_data_two_tickers",
+        lambda *_a, **_k: pl.DataFrame(
+            {
+                "Date": [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)],
+                "Close_1": [100.0, 101.0],
+                "Close_2": [200.0, 202.0],
+            }
+        ),
+    )
+
+    app.prepare_pairs_trading_strategy_with_optimisation(
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 31),
+        {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5},
+        optimise=False,
+    )
+
+    assert captured["load_two_tickers"] is app._cached_load_yfinance_data_two_tickers
+    assert captured["same_company_check"] is app._cached_is_same_company
