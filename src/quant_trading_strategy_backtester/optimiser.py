@@ -7,7 +7,7 @@ import datetime
 import itertools
 import math
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
 import polars as pl
@@ -18,10 +18,11 @@ from quant_trading_strategy_backtester.cointegration import (
     evaluate_cointegration,
 )
 from quant_trading_strategy_backtester.data import (
+    extract_pair_close_data,
     get_top_sp500_companies,
     is_same_company,
+    load_yfinance_data_many_tickers,
     load_yfinance_data_one_ticker,
-    load_yfinance_data_two_tickers,
 )
 from quant_trading_strategy_backtester.strategies.base import (
     TRADING_STRATEGIES,
@@ -280,9 +281,16 @@ def count_valid_parameter_combinations(
 def count_candidate_pairs(
     top_companies: list[tuple[str, float]],
     same_company_check: Callable[[str, str], bool] | None = None,
+    company_ciks: Mapping[str, str] | None = None,
 ) -> int:
     """Return pair candidates after same-company filtering."""
-    return len(_candidate_pairs(top_companies, same_company_check=same_company_check))
+    return len(
+        _candidate_pairs(
+            top_companies,
+            same_company_check=same_company_check,
+            company_ciks=company_ciks,
+        )
+    )
 
 
 def run_walk_forward_optimisation(
@@ -764,7 +772,12 @@ def optimise_pairs_trading_tickers(
         [str, str, datetime.date, datetime.date], pl.DataFrame | None
     ]
     | None = None,
+    load_many_tickers: Callable[
+        [Sequence[str], datetime.date, datetime.date], pl.DataFrame | None
+    ]
+    | None = None,
     same_company_check: Callable[[str, str], bool] | None = None,
+    company_ciks: Mapping[str, str] | None = None,
     initial_capital: float = DEFAULT_INITIAL_CAPITAL,
     transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
     slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
@@ -787,9 +800,14 @@ def optimise_pairs_trading_tickers(
         progress_callback: Optional callback invoked as
             (current, total, message) for each candidate pair.
         status_callback: Optional callback invoked with summary messages.
-        load_two_tickers: Optional two-ticker loader override (for caching).
+        load_two_tickers: Optional per-pair loader override. When omitted,
+            all unique candidate tickers are batch-downloaded once.
+        load_many_tickers: Optional batched multi-ticker loader override
+            (for caching). Ignored when `load_two_tickers` is provided.
         same_company_check: Optional same-company predicate override (for
             caching).
+        company_ciks: Optional ticker-to-CIK mapping used to filter
+            same-company pairs without Yahoo Finance metadata calls.
         initial_capital: Starting capital for the backtest and equity curve.
         transaction_cost_bps: Transaction cost per trade in basis points.
         slippage_bps: Slippage per trade in basis points.
@@ -804,14 +822,11 @@ def optimise_pairs_trading_tickers(
     best_test_data = None
     best_sharpe_ratio = float("-inf")
     evaluated_pairs = 0
-    pair_loader = (
-        load_two_tickers
-        if load_two_tickers is not None
-        else load_yfinance_data_two_tickers
-    )
 
     ticker_pairs = _candidate_pairs(
-        top_companies, same_company_check=same_company_check
+        top_companies,
+        same_company_check=same_company_check,
+        company_ciks=company_ciks,
     )
     total_combinations = len(ticker_pairs)
     parameter_combinations = 0
@@ -824,6 +839,18 @@ def optimise_pairs_trading_tickers(
         parameter_combinations = count_valid_parameter_combinations(
             "Pairs Trading", optimisation_parameter_ranges
         )
+
+    batch_data: pl.DataFrame | None = None
+    if load_two_tickers is None and ticker_pairs:
+        unique_tickers = tuple(
+            dict.fromkeys(ticker for pair in ticker_pairs for ticker in pair)
+        )
+        batch_loader = (
+            load_many_tickers
+            if load_many_tickers is not None
+            else load_yfinance_data_many_tickers
+        )
+        batch_data = batch_loader(unique_tickers, start_date, end_date)
 
     prev_pair_processing_time = 0.0
     rejected_pairs = 0
@@ -840,7 +867,12 @@ def optimise_pairs_trading_tickers(
                 f"{prev_pair_processing_time:.4f} seconds)",
             )
 
-        data = pair_loader(ticker1, ticker2, start_date, end_date)
+        if load_two_tickers is not None:
+            data = load_two_tickers(ticker1, ticker2, start_date, end_date)
+        elif batch_data is not None:
+            data = extract_pair_close_data(batch_data, ticker1, ticker2)
+        else:
+            data = None
         if data is None or data.is_empty():
             continue
 
@@ -1217,15 +1249,25 @@ def _parameter_values(
 def _candidate_pairs(
     top_companies: list[tuple[str, float]],
     same_company_check: Callable[[str, str], bool] | None = None,
+    company_ciks: Mapping[str, str] | None = None,
 ) -> list[tuple[str, str]]:
     """Return ticker pairs after excluding likely same-company pairs."""
-    check_same = (
-        same_company_check if same_company_check is not None else is_same_company
-    )
     ticker_pairs = list(
         itertools.combinations([company[0] for company in top_companies], 2)
     )
-    return [pair for pair in ticker_pairs if not check_same(pair[0], pair[1])]
+    if same_company_check is not None:
+        return [
+            pair for pair in ticker_pairs if not same_company_check(pair[0], pair[1])
+        ]
+
+    if company_ciks is not None:
+        return [
+            pair
+            for pair in ticker_pairs
+            if not is_same_company(pair[0], pair[1], company_ciks=company_ciks)
+        ]
+
+    return [pair for pair in ticker_pairs if not is_same_company(pair[0], pair[1])]
 
 
 def run_backtest(

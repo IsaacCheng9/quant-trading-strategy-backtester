@@ -218,18 +218,19 @@ def test_prepare_buy_and_hold_strategy_with_optimisation(monkeypatch):
 
 
 def test_optimise_pairs_trading_tickers(monkeypatch):
-    # Mock data and functions
+    # Mock data and functions.
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
-    mock_polars_data = pl.DataFrame(
+    mock_batch_data = pl.DataFrame(
         {
             "Date": [datetime.date(2020, 1, day) for day in range(1, 4)],
-            "Close_1": [100, 101, 102],
-            "Close_2": [200, 202, 204],
+            "AAPL": [100.0, 101.0, 102.0],
+            "GOOGL": [200.0, 202.0, 204.0],
+            "MSFT": [300.0, 303.0, 306.0],
         }
     )
 
-    def mock_load_data(*args, **kwargs):
-        return mock_polars_data
+    def mock_load_many_data(*args, **kwargs):
+        return mock_batch_data
 
     def mock_run_backtest(*args, **kwargs):
         return None, {"Sharpe Ratio": 1.5}
@@ -240,12 +241,8 @@ def test_optimise_pairs_trading_tickers(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.data.load_yfinance_data_two_tickers",
-        mock_load_data,
-    )
-    monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        mock_load_data,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        mock_load_many_data,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.is_same_company",
@@ -303,11 +300,12 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
     """Verify fixed-parameter pair selection ignores held-out test metrics."""
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
-    mock_polars_data = pl.DataFrame(
+    mock_batch_data = pl.DataFrame(
         {
             "Date": dates,
-            "Close_1": [100.0 + i for i in range(10)],
-            "Close_2": [200.0 + i for i in range(10)],
+            "AAPL": [100.0 + i for i in range(10)],
+            "GOOGL": [200.0 + i for i in range(10)],
+            "MSFT": [300.0 + i for i in range(10)],
         }
     )
     strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
@@ -322,8 +320,8 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
         ("GOOGL", "MSFT"): 0.0,
     }
 
-    def mock_load_data(*args, **kwargs):
-        return mock_polars_data
+    def mock_load_many_data(*args, **kwargs):
+        return mock_batch_data
 
     def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         pair = tuple(tickers)
@@ -350,8 +348,8 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        mock_load_data,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        mock_load_many_data,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.is_same_company",
@@ -388,11 +386,12 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
     """Verify optimised pair selection does not pass test data into grid search."""
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
-    mock_polars_data = pl.DataFrame(
+    mock_batch_data = pl.DataFrame(
         {
             "Date": dates,
-            "Close_1": [100.0 + i for i in range(10)],
-            "Close_2": [200.0 + i for i in range(10)],
+            "AAPL": [100.0 + i for i in range(10)],
+            "GOOGL": [200.0 + i for i in range(10)],
+            "MSFT": [300.0 + i for i in range(10)],
         }
     )
     strategy_params = {
@@ -406,8 +405,8 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
         ("GOOGL", "MSFT"): 0.5,
     }
 
-    def mock_load_data(*args, **kwargs):
-        return mock_polars_data
+    def mock_load_many_data(*args, **kwargs):
+        return mock_batch_data
 
     def mock_optimise_strategy_params(
         data,
@@ -447,8 +446,8 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        mock_load_data,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        mock_load_many_data,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.is_same_company",
@@ -490,11 +489,12 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
     """Verify automatic pair selection rejects non-cointegrated candidates."""
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0), ("MSFT", 800000.0)]
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(100)]
-    base_data = pl.DataFrame(
+    mock_batch_data = pl.DataFrame(
         {
             "Date": dates,
-            "Close_1": [100.0 + i * 0.1 for i in range(100)],
-            "Close_2": [200.0 + i * 0.2 for i in range(100)],
+            "AAPL": [100.0 + i * 0.1 for i in range(100)],
+            "GOOGL": [200.0 + i * 0.2 for i in range(100)],
+            "MSFT": [300.0 + i * 0.3 for i in range(100)],
         }
     )
     strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
@@ -504,12 +504,9 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
         ("GOOGL", "MSFT"): 1.0,
     }
 
-    def mock_load_data(ticker1, ticker2, *_args, **_kwargs):
-        return base_data.with_columns(pl.lit(f"{ticker1}/{ticker2}").alias("Pair"))
-
     def mock_evaluate_cointegration(data, **_kwargs):
-        pair = tuple(data["Pair"][0].split("/"))
-        return _cointegration_result(pair != ("AAPL", "GOOGL"))
+        is_aapl_googl = data["Close_1"][0] == 100.0 and data["Close_2"][0] == 200.0
+        return _cointegration_result(not is_aapl_googl)
 
     def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         pair = tuple(tickers)
@@ -535,8 +532,8 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
         }
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        mock_load_data,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        lambda *_args, **_kwargs: mock_batch_data,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.is_same_company",
@@ -572,18 +569,18 @@ def test_optimise_pairs_trading_tickers_raises_when_all_pairs_fail_filter(
     """Verify pair selection fails clearly when no candidate is cointegrated."""
     mock_top_companies = [("AAPL", 1000000.0), ("GOOGL", 900000.0)]
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(100)]
-    mock_polars_data = pl.DataFrame(
+    mock_batch_data = pl.DataFrame(
         {
             "Date": dates,
-            "Close_1": [100.0 + i * 0.1 for i in range(100)],
-            "Close_2": [200.0 + i * 0.2 for i in range(100)],
+            "AAPL": [100.0 + i * 0.1 for i in range(100)],
+            "GOOGL": [200.0 + i * 0.2 for i in range(100)],
         }
     )
     strategy_params = {"window": 20, "entry_z_score": 2.0, "exit_z_score": 0.5}
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        lambda *_args, **_kwargs: mock_polars_data,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        lambda *_args, **_kwargs: mock_batch_data,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.is_same_company",
@@ -1825,17 +1822,18 @@ def test_optimise_pairs_trading_tickers_invokes_callbacks(monkeypatch) -> None:
     """Verify pairs ticker selection reports progress and status messages."""
     top_companies = [("AAPL", 3.0), ("GOOGL", 2.0), ("MSFT", 1.0)]
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(20)]
-    mock_data = pl.DataFrame(
+    mock_batch_data = pl.DataFrame(
         {
             "Date": dates,
-            "Close_1": [100.0 + i * 0.1 for i in range(20)],
-            "Close_2": [200.0 + i * 0.2 for i in range(20)],
+            "AAPL": [100.0 + i * 0.1 for i in range(20)],
+            "GOOGL": [200.0 + i * 0.2 for i in range(20)],
+            "MSFT": [300.0 + i * 0.3 for i in range(20)],
         }
     )
 
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        lambda *_args, **_kwargs: mock_data,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        lambda *_args, **_kwargs: mock_batch_data,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.is_same_company",
@@ -2198,3 +2196,193 @@ def test_optimise_buy_and_hold_and_pairs_forward_trading_assumptions(
             "slippage_bps": 7.5,
         },
     ]
+
+
+def test_count_candidate_pairs_uses_company_ciks_without_yfinance_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify CIK filtering excludes dual-class pairs with zero Yahoo calls."""
+    monkeypatch.setattr(
+        "yfinance.Ticker",
+        lambda *_args, **_kwargs: pytest.fail("Yahoo Finance should not be called"),
+    )
+    top_companies = [
+        ("GOOG", 5.0),
+        ("GOOGL", 4.5),
+        ("FOX", 3.0),
+        ("FOXA", 2.5),
+        ("MSFT", 1.0),
+    ]
+    ciks = {
+        "GOOG": "0001652044",
+        "GOOGL": "0001652044",
+        "FOX": "0001754301",
+        "FOXA": "0001754301",
+        "MSFT": "0000789019",
+    }
+
+    # C(5, 2) = 10 total pairs minus (GOOG, GOOGL) and (FOX, FOXA) = 8.
+    assert count_candidate_pairs(top_companies, company_ciks=ciks) == 8
+
+
+def test_count_candidate_pairs_fallback_bounds_yfinance_calls_to_n(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify fallback filtering makes at most N Yahoo .info lookups."""
+    names = {
+        "GOOG": "Alphabet Inc.",
+        "GOOGL": "Alphabet Inc.",
+        "AAPL": "Apple Inc.",
+        "MSFT": "Microsoft Corporation",
+        "NVDA": "NVIDIA Corporation",
+    }
+    info_calls: list[str] = []
+
+    def mock_ticker(symbol: str):
+        class MockTicker:
+            @property
+            def info(self) -> dict[str, str]:
+                info_calls.append(symbol)
+                return {"longName": names[symbol]}
+
+        return MockTicker()
+
+    monkeypatch.setattr("yfinance.Ticker", mock_ticker)
+    top_companies = [(ticker, float(idx + 1)) for idx, ticker in enumerate(names)]
+
+    # C(5, 2) = 10 pairs minus (GOOG, GOOGL) = 9, with <= 5 Yahoo calls.
+    assert count_candidate_pairs(top_companies) == 9
+    assert len(info_calls) == 5
+
+
+def test_optimise_pairs_trading_tickers_batch_downloads_once_and_joins_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify pair selection batch-downloads once and drops nulls per pair."""
+    monkeypatch.setattr(
+        "yfinance.Ticker",
+        lambda *_args, **_kwargs: pytest.fail("Yahoo Finance should not be called"),
+    )
+    top_companies = [
+        ("AAPL", 4.0),
+        ("MSFT", 3.0),
+        ("GOOG", 2.0),
+        ("GOOGL", 1.5),
+    ]
+    ciks = {
+        "AAPL": "0000320193",
+        "MSFT": "0000789019",
+        "GOOG": "0001652044",
+        "GOOGL": "0001652044",
+    }
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
+    batch_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "AAPL": [100.0 + i for i in range(10)],
+            "MSFT": [None if i == 0 else 200.0 + i for i in range(10)],
+            "GOOG": [300.0 + i for i in range(10)],
+            "GOOGL": [310.0 + i for i in range(10)],
+        }
+    )
+
+    batch_calls: list[tuple[str, ...]] = []
+    seen_train_lengths: dict[tuple[str, str], int] = {}
+
+    def mock_load_many(tickers, start_date, end_date):
+        batch_calls.append(tuple(tickers))
+        return batch_data
+
+    def mock_run_backtest(data, strategy_type, params, tickers):
+        pair = tuple(tickers)
+        seen_train_lengths[pair] = len(data)
+        sharpe = 2.5 if pair == ("AAPL", "GOOG") else 1.0
+        return None, {
+            "Sharpe Ratio": sharpe,
+            "Total Return": 0.1,
+            "Max Drawdown": -0.05,
+        }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_args, **_kwargs: _cointegration_result(True),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        mock_run_backtest,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        lambda *_args, **_kwargs: (pl.DataFrame(), {"Sharpe Ratio": 2.0}),
+    )
+
+    best_pair, _, metrics = optimise_pairs_trading_tickers(
+        top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 11),
+        {"window": 5, "entry_z_score": 2.0, "exit_z_score": 0.5},
+        optimise=False,
+        load_many_tickers=mock_load_many,
+        company_ciks=ciks,
+    )
+
+    # Single batch call for unique tickers, and (GOOG, GOOGL) excluded by CIK.
+    assert batch_calls == [("AAPL", "MSFT", "GOOG", "GOOGL")]
+    assert ("GOOG", "GOOGL") not in seen_train_lengths
+    # AAPL/GOOG retains all 10 rows (7 train); AAPL/MSFT drops day 0 (6 train).
+    assert seen_train_lengths[("AAPL", "GOOG")] == 7
+    assert seen_train_lengths[("AAPL", "MSFT")] == 6
+    assert best_pair == ("AAPL", "GOOG")
+    assert metrics["Sharpe Ratio"] == 2.0
+
+
+def test_optimise_pairs_trading_tickers_honours_load_two_tickers_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify explicit load_two_tickers override bypasses batch downloads."""
+    top_companies = [("AAPL", 3.0), ("MSFT", 2.0), ("GOOGL", 1.0)]
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(10)]
+    pair_frame = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close_1": [100.0 + i for i in range(10)],
+            "Close_2": [200.0 + i for i in range(10)],
+        }
+    )
+    pair_calls: list[tuple[str, str]] = []
+
+    def custom_pair_loader(ticker1, ticker2, start_date, end_date):
+        pair_calls.append((ticker1, ticker2))
+        return pair_frame
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        lambda *_args, **_kwargs: pytest.fail("Batch loader must not be called"),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.is_same_company",
+        lambda *_args: False,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_args, **_kwargs: _cointegration_result(True),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        lambda *_args, **_kwargs: (None, {"Sharpe Ratio": 1.2}),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        lambda *_args, **_kwargs: (pl.DataFrame(), {"Sharpe Ratio": 1.0}),
+    )
+
+    optimise_pairs_trading_tickers(
+        top_companies,
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 11),
+        {"window": 5, "entry_z_score": 2.0, "exit_z_score": 0.5},
+        optimise=False,
+        load_two_tickers=custom_pair_loader,
+    )
+
+    assert pair_calls == [("AAPL", "MSFT"), ("AAPL", "GOOGL"), ("MSFT", "GOOGL")]

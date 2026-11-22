@@ -14,7 +14,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -32,6 +32,7 @@ from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
     is_same_company,
+    load_yfinance_data_many_tickers,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
@@ -99,6 +100,16 @@ def _cached_load_yfinance_data_two_tickers(
 ) -> pl.DataFrame:
     """Cache two-ticker Yahoo Finance downloads across Streamlit reruns."""
     return load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+
+
+@st.cache_data
+def _cached_load_yfinance_data_many_tickers(
+    tickers: Sequence[str],
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> pl.DataFrame:
+    """Cache batched multi-ticker Yahoo Finance downloads across reruns."""
+    return load_yfinance_data_many_tickers(tickers, start_date, end_date)
 
 
 @st.cache_data
@@ -729,7 +740,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
             optimise,
             progress_callback=progress_callback,
             status_callback=_display_status_message,
-            load_two_tickers=_cached_load_yfinance_data_two_tickers,
+            load_many_tickers=_cached_load_yfinance_data_many_tickers,
             same_company_check=_cached_is_same_company,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,

@@ -330,6 +330,7 @@ def test_app_injects_cached_loaders_into_optimiser(
 
     def fake_optimise_pairs(*args: object, **kwargs: object):
         captured["load_two_tickers"] = kwargs.get("load_two_tickers")
+        captured["load_many_tickers"] = kwargs.get("load_many_tickers")
         captured["same_company_check"] = kwargs.get("same_company_check")
         return (
             ("AAPL", "MSFT"),
@@ -362,8 +363,44 @@ def test_app_injects_cached_loaders_into_optimiser(
         optimise=False,
     )
 
-    assert captured["load_two_tickers"] is app._cached_load_yfinance_data_two_tickers
+    assert captured["load_two_tickers"] is None
+    assert captured["load_many_tickers"] is app._cached_load_yfinance_data_many_tickers
     assert captured["same_company_check"] is app._cached_is_same_company
+
+
+def test_cached_load_yfinance_data_many_tickers_caches_batch_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify _cached_load_yfinance_data_many_tickers caches repeated calls."""
+    calls: list[tuple[str, ...]] = []
+    expected = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)],
+            "AAPL": [100.0, 101.0],
+            "MSFT": [200.0, 202.0],
+        }
+    )
+
+    def fake_load_many(tickers, start_date, end_date):
+        calls.append(tuple(tickers))
+        return expected
+
+    monkeypatch.setattr(app, "load_yfinance_data_many_tickers", fake_load_many)
+
+    first = app._cached_load_yfinance_data_many_tickers(
+        ("AAPL", "MSFT"),
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 3),
+    )
+    second = app._cached_load_yfinance_data_many_tickers(
+        ("AAPL", "MSFT"),
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 3),
+    )
+
+    assert calls == [("AAPL", "MSFT")]
+    assert first.equals(expected)
+    assert second.equals(expected)
 
 
 def test_get_final_backtest_data_walk_forward_returns_stitched_oos_slice(
