@@ -248,6 +248,8 @@ def evaluate_validation_period(
             transaction_cost_bps=transaction_cost_bps,
             slippage_bps=slippage_bps,
         )
+    else:
+        validation_results = _normalise_transition_column_dtypes(validation_results)
 
     validation_results = _reset_cumulative_result_columns(
         validation_results,
@@ -308,6 +310,28 @@ def _extract_closing_position(results: pl.DataFrame) -> PortfolioPosition:
         )
 
     return PortfolioPosition(signal=signal)
+
+
+def _normalise_transition_column_dtypes(results: pl.DataFrame) -> pl.DataFrame:
+    """Cast fold-transition numeric columns to Float64 for uniform schemas."""
+    transition_columns = (
+        "gross_strategy_returns",
+        "position_change",
+        "leg_1_weight_change",
+        "leg_2_weight_change",
+        "trade_turnover",
+        "pair_turnover",
+        "transaction_costs",
+        "strategy_returns",
+    )
+    casts = [
+        pl.col(column).cast(pl.Float64)
+        for column in transition_columns
+        if column in results.columns and results.schema[column] != pl.Float64
+    ]
+    if not casts:
+        return results
+    return results.with_columns(casts)
 
 
 def _reconcile_fold_transition(
@@ -402,6 +426,14 @@ def _reconcile_fold_transition(
         if "pair_turnover" in validation_results.columns:
             row_updates["pair_turnover"] = turnover
     else:
+        if (
+            prior_position.leg_1_weight is not None
+            or prior_position.leg_2_weight is not None
+        ):
+            raise ValueError(
+                "Single-asset fold transition cannot accept leg_1_weight or "
+                "leg_2_weight on prior_position"
+            )
         required_columns = {
             "signal",
             "asset_returns",
@@ -1242,7 +1274,7 @@ def stitch_walk_forward_oos_results(
             )
         oos_frames.append(oos_results)
 
-    stitched_results = pl.concat(oos_frames, how="vertical")
+    stitched_results = pl.concat(oos_frames, how="vertical_relaxed")
     if "Date" in stitched_results.columns:
         stitched_results = stitched_results.sort("Date")
     stitched_results = _reset_cumulative_result_columns(

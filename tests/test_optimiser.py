@@ -24,6 +24,7 @@ from quant_trading_strategy_backtester.backtester import (
 from quant_trading_strategy_backtester.cointegration import CointegrationResult
 from quant_trading_strategy_backtester.optimiser import (
     PortfolioPosition,
+    _extract_closing_position,
     _split_data,
     count_candidate_pairs,
     count_valid_parameter_combinations,
@@ -3004,3 +3005,132 @@ def test_fold_transition_reconciliation_validates_inputs(
             "TEST",
             prior_position=PortfolioPosition(signal=0.0),
         )
+
+    with pytest.raises(ValueError, match="cannot accept leg_1_weight"):
+        evaluate_validation_period(
+            single_data,
+            single_data[3:],
+            "Buy and Hold",
+            {},
+            "TEST",
+            prior_position=PortfolioPosition(
+                signal=1.0, leg_1_weight=0.5, leg_2_weight=-0.5
+            ),
+        )
+
+
+def test_fold_transitions_handle_int64_signals_unsorted_dates_and_nulls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Int64 signals stitch cleanly and edge cases stay safe."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(9)]
+    closes = [100.0 + i * 2.0 for i in range(9)]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+
+    def int64_run_backtest(
+        frame: pl.DataFrame,
+        strategy_type: str,
+        params: dict[str, Any],
+        tickers: str | list[str],
+        **kwargs: Any,
+    ) -> tuple[pl.DataFrame, dict[str, float]]:
+        n_rows = len(frame)
+        signal_val = 1 if params.get("short_window", 1) == 1 else -1
+        signals = [signal_val] * n_rows
+        pos_changes = [signal_val] + [0] * (n_rows - 1)
+        asset_rets = [0.0] + [
+            (frame["Close"][i] - frame["Close"][i - 1]) / frame["Close"][i - 1]
+            for i in range(1, n_rows)
+        ]
+        gross = [0.0] + [signal_val * r for r in asset_rets[1:]]
+        turnover = [abs(c) for c in pos_changes]
+        cost_rate = (
+            kwargs.get("transaction_cost_bps", 5.0) + kwargs.get("slippage_bps", 3.0)
+        ) / 10_000
+        tx_costs = [t * cost_rate for t in turnover]
+        net = [g - c for g, c in zip(gross, tx_costs, strict=True)]
+        results = pl.DataFrame(
+            {
+                "Date": frame["Date"],
+                "Close": frame["Close"],
+                "signal": pl.Series(signals, dtype=pl.Int64),
+                "position_change": pl.Series(pos_changes, dtype=pl.Int64),
+                "asset_returns": pl.Series(asset_rets, dtype=pl.Float64),
+                "gross_strategy_returns": pl.Series(gross, dtype=pl.Float64),
+                "trade_turnover": pl.Series(turnover, dtype=pl.Int64),
+                "transaction_costs": pl.Series(tx_costs, dtype=pl.Float64),
+                "strategy_returns": pl.Series(net, dtype=pl.Float64),
+                "gross_cumulative_returns": pl.Series([1.0] * n_rows, dtype=pl.Float64),
+                "cumulative_returns": pl.Series([1.0] * n_rows, dtype=pl.Float64),
+                "equity_curve": pl.Series([100_000.0] * n_rows, dtype=pl.Float64),
+                "cumulative_transaction_costs": pl.Series(
+                    [0.0] * n_rows, dtype=pl.Float64
+                ),
+            }
+        )
+        return results, {"Sharpe Ratio": 1.0}
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        int64_run_backtest,
+    )
+
+    fold_1_res, _ = evaluate_validation_period(
+        data[:6],
+        data[3:6],
+        "Moving Average Crossover",
+        {"short_window": 1, "long_window": 2},
+        "TEST",
+    )
+    # Pass unsorted validation_data to verify maintain_order keeps row 0 first.
+    unsorted_fold_2 = data[6:9].reverse()
+    fold_2_res, _ = evaluate_validation_period(
+        data[:9],
+        unsorted_fold_2,
+        "Moving Average Crossover",
+        {"short_window": 2, "long_window": 3},
+        "TEST",
+        prior_position=_extract_closing_position(fold_1_res),
+    )
+
+    assert fold_1_res.schema == fold_2_res.schema
+    assert fold_2_res["Date"][0] == dates[6]
+    assert fold_2_res["position_change"][0] == pytest.approx(-2.0)
+    assert fold_2_res["trade_turnover"][0] == pytest.approx(2.0)
+
+    # Both direct vertical concat and stitch_walk_forward_oos_results succeed.
+    assert len(pl.concat([fold_1_res, fold_2_res], how="vertical")) == 6
+    stitched, _ = stitch_walk_forward_oos_results(
+        [
+            {"fold": 1, "oos_results": fold_1_res},
+            {"fold": 2, "oos_results": fold_2_res},
+        ]
+    )
+    assert len(stitched) == 6
+
+    # Direct stitch with mixed Int64/Float64 fold frames also succeeds.
+    int64_fold = fold_1_res.with_columns(
+        pl.col("position_change").cast(pl.Int64),
+        pl.col("trade_turnover").cast(pl.Int64),
+    )
+    mixed_stitched, _ = stitch_walk_forward_oos_results(
+        [
+            {"fold": 1, "oos_results": int64_fold},
+            {"fold": 2, "oos_results": fold_2_res},
+        ]
+    )
+    assert len(mixed_stitched) == 6
+
+    # None / NaN closing signals and weights fall back cleanly to 0.0.
+    null_closing = pl.DataFrame(
+        {
+            "signal": pl.Series([1.0, None], dtype=pl.Float64),
+            "leg_1_weight": pl.Series([0.5, float("nan")], dtype=pl.Float64),
+            "leg_2_weight": pl.Series([-0.5, None], dtype=pl.Float64),
+        }
+    )
+    assert _extract_closing_position(null_closing) == PortfolioPosition(
+        signal=0.0,
+        leg_1_weight=0.0,
+        leg_2_weight=0.0,
+    )
