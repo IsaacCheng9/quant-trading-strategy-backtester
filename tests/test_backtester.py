@@ -273,34 +273,91 @@ def test_backtester_with_insufficient_data_all_strategies(
     assert len(results) == len(insufficient_data)
 
 
-def test_backtester_save_results(mock_db_session, mock_polars_data):
+def test_backtester_save_results(sqlite_store, session_factory, mock_polars_data):
+    """Verify Backtester.save_results persists structured strategy results."""
     strategy = MovingAverageCrossoverStrategy({"short_window": 5, "long_window": 20})
-    backtester = Backtester(mock_polars_data, strategy, session=mock_db_session)
+    backtester = Backtester(mock_polars_data, strategy, tickers="AAPL")
     backtester.run()
-    backtester.save_results()
 
-    # Print metrics for debugging
-    metrics = backtester.get_performance_metrics()
-    print("Metrics before saving:", metrics)
+    saved = backtester.save_results(store=sqlite_store)
 
-    # Verify that the results were saved to the mocked database
-    saved_strategy = (
-        mock_db_session.query(StrategyModel)
-        .filter_by(name="MovingAverageCrossoverStrategy")
-        .first()
-    )
+    assert saved is True
+    with session_factory() as session:
+        saved_strategy = (
+            session.query(StrategyModel)
+            .filter_by(name="MovingAverageCrossoverStrategy")
+            .first()
+        )
 
     assert saved_strategy is not None
-    print("Saved strategy:", saved_strategy.__dict__)
-    assert saved_strategy.parameters == '{"short_window": 5, "long_window": 20}'
+    assert saved_strategy.parameters == {"long_window": 20, "short_window": 5}
+    assert saved_strategy.tickers == "AAPL"
     assert saved_strategy.total_return is not None
-
-    # Check if sharpe_ratio is either NaN or None
-    assert saved_strategy.sharpe_ratio is None or math.isnan(
-        saved_strategy.sharpe_ratio
-    )
-
+    assert saved_strategy.sharpe_ratio is None
     assert saved_strategy.max_drawdown is not None
+
+
+def test_build_strategy_record_handles_unrun_empty_and_date_dtypes() -> None:
+    """Verify build_strategy_record guards empty states and date dtypes."""
+    empty_data = pl.DataFrame(schema={"Date": pl.Date, "Close": pl.Float64})
+    unrun_bt = Backtester(
+        pl.DataFrame(
+            {
+                "Date": [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)],
+                "Close": [100.0, 101.0],
+            }
+        ),
+        BuyAndHoldStrategy({}),
+        tickers="AAPL",
+    )
+    with pytest.raises(ValueError, match="hasn't been run"):
+        unrun_bt.build_strategy_record()
+
+    empty_bt = Backtester(empty_data, BuyAndHoldStrategy({}), tickers="AAPL")
+    empty_bt.run()
+    assert empty_bt.get_performance_metrics() is None
+    with pytest.raises(ValueError, match="no results"):
+        empty_bt.build_strategy_record()
+
+    # Non-empty results with empty input data must raise clearly.
+    unrun_bt.run()
+    unrun_bt.data = empty_data
+    with pytest.raises(ValueError, match="data is empty"):
+        unrun_bt.build_strategy_record()
+
+    # Verify both pl.Date and pl.Datetime columns extract start/end dates.
+    date_bt = Backtester(
+        pl.DataFrame(
+            {
+                "Date": [datetime.date(2020, 1, 2), datetime.date(2020, 1, 5)],
+                "Close": [100.0, 105.0],
+            }
+        ),
+        BuyAndHoldStrategy({}),
+        tickers="AAPL",
+    )
+    date_bt.run()
+    date_record = date_bt.build_strategy_record()
+    assert date_record.start_date == datetime.date(2020, 1, 2)
+    assert date_record.end_date == datetime.date(2020, 1, 5)
+
+    dt_bt = Backtester(
+        pl.DataFrame(
+            {
+                "Date": [
+                    datetime.datetime(2020, 2, 3, 15, 0, tzinfo=datetime.UTC),
+                    datetime.datetime(2020, 2, 6, 15, 0, tzinfo=datetime.UTC),
+                ],
+                "Close": [100.0, 102.0],
+            }
+        ),
+        BuyAndHoldStrategy({}),
+        tickers="MSFT",
+    )
+    dt_bt.run()
+    dt_record = dt_bt.build_strategy_record()
+    assert dt_record.start_date == datetime.date(2020, 2, 3)
+    assert dt_record.end_date == datetime.date(2020, 2, 6)
 
 
 def test_returns_captured_while_holding_position():

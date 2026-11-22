@@ -12,13 +12,15 @@ For instructions on how to run the application, refer to the README.md.
 import datetime
 import json
 import math
+import os
 import time
+from pathlib import Path
 from typing import Any, cast
 
 import polars as pl
 import streamlit as st
 
-from quant_trading_strategy_backtester.backtester import Backtester, is_running_locally
+from quant_trading_strategy_backtester.backtester import Backtester
 from quant_trading_strategy_backtester.benchmark import (
     BENCHMARK_TICKER,
     calculate_benchmark_relative_metrics,
@@ -30,7 +32,6 @@ from quant_trading_strategy_backtester.data import (
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
-from quant_trading_strategy_backtester.models import Session, StrategyModel
 from quant_trading_strategy_backtester.optimiser import (
     create_strategy,
     evaluate_validation_period,
@@ -41,6 +42,11 @@ from quant_trading_strategy_backtester.optimiser import (
     optimise_single_ticker_strategy_ticker,
     run_backtest,
     run_optimisation,
+)
+from quant_trading_strategy_backtester.storage import (
+    InMemoryStrategyStore,
+    SQLiteStrategyStore,
+    StrategyStore,
 )
 from quant_trading_strategy_backtester.streamlit_ui import (
     get_user_inputs_except_strategy_params,
@@ -591,108 +597,112 @@ def prepare_single_ticker_strategy(
     return data, ticker_display, strategy_params
 
 
-def display_historical_results():
-    """
-    Displays historical strategy results from either the database or session state,
-    depending on the environment.
-    """
-    if is_running_locally():
-        # Use SQLite (existing code)
-        session = Session()
-        strategies = (
-            session.query(StrategyModel)
-            .order_by(StrategyModel.date_created.desc())
-            .all()
+def _is_streamlit_cloud() -> bool:
+    """Return True when running on Streamlit Cloud or a read-only directory."""
+    if os.environ.get("STREAMLIT_SHARING_MODE") or os.environ.get("STREAMLIT_CLOUD"):
+        return True
+    return not os.access(Path.cwd(), os.W_OK)
+
+
+def _get_strategy_store() -> StrategyStore:
+    """Select an in-memory store on Streamlit Cloud or SQLite locally."""
+    if _is_streamlit_cloud():
+        records = cast(
+            list[dict[str, Any]],
+            st.session_state.setdefault("strategy_results", []),
         )
-        session.close()
-    else:
-        # Use Streamlit session state
-        if "strategy_results" not in st.session_state:
-            strategies = []
-        else:
-            strategies = sorted(
-                st.session_state.strategy_results,
-                key=lambda x: x["date_created"],
-                reverse=True,
-            )
+        return InMemoryStrategyStore(records)
+    return SQLiteStrategyStore()
+
+
+def _build_save_key(
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+    start_date: datetime.date,
+    end_date: datetime.date,
+    optimise: bool,
+    walk_forward: bool,
+    auto_select_tickers: bool,
+) -> str:
+    """Build a canonical deduplication key for Streamlit session reruns."""
+    payload = {
+        "strategy_type": strategy_type,
+        "strategy_params": strategy_params,
+        "tickers": tickers,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "optimise": optimise,
+        "walk_forward": walk_forward,
+        "auto_select_tickers": auto_select_tickers,
+    }
+    return json.dumps(payload, sort_keys=True, default=str)
+
+
+def _format_historical_sharpe(sharpe_ratio: float | None) -> str:
+    """Format a historical Sharpe ratio for display in the results list."""
+    if sharpe_ratio is not None and math.isfinite(sharpe_ratio):
+        return f"{sharpe_ratio:.2f}"
+    return "N/A"
+
+
+def display_historical_results(store: StrategyStore | None = None) -> None:
+    """Display historical strategy results from the active strategy store.
+
+    Args:
+        store: Strategy store to read from. Defaults to the environment store.
+    """
+    target_store = store if store is not None else _get_strategy_store()
+    strategies = target_store.list_recent()
 
     if not strategies:
         st.info("No historical strategy results available.")
         return
 
-    if not is_running_locally():
-        st.info("""
-            📝 **Note about Results History:**
+    if isinstance(target_store, InMemoryStrategyStore):
+        st.info(
+            """
+            **Note about Results History:**
             - Strategy results are saved within your current session
             - Results will be available as long as you keep this tab open
             - Results are reset when you refresh the page or start a new session
-            """)
+            """
+        )
 
     st.header("Historical Strategy Results")
 
-    # Display strategies
+    # Display stored strategy records newest first.
     for strategy in strategies:
-        # Handle either SQLite model or session state dict
-        if is_running_locally():
-            strategy_name = strategy.name
-            date_created = strategy.date_created
-            try:
-                tickers = json.loads(str(strategy.tickers))
-            except (json.JSONDecodeError, TypeError):
-                tickers = strategy.tickers
-            try:
-                params = json.loads(str(strategy.parameters))
-            except (json.JSONDecodeError, TypeError):
-                params = cast(dict[str, Any], strategy.parameters)
-            total_return = strategy.total_return
-            sharpe_ratio = cast(float | None, strategy.sharpe_ratio)
-            max_drawdown = strategy.max_drawdown
-            start_date = strategy.start_date
-            end_date = strategy.end_date
-        else:
-            strategy_name = strategy["name"]
-            date_created = strategy["date_created"]
-            tickers = strategy["tickers"]
-            params: dict = strategy["parameters"]
-            total_return = strategy["total_return"]
-            sharpe_ratio: float | None = strategy["sharpe_ratio"]
-            max_drawdown = strategy["max_drawdown"]
-            start_date = strategy["start_date"]
-            end_date = strategy["end_date"]
-
         ticker_display = (
-            " vs. ".join(str(t) for t in tickers)
-            if isinstance(tickers, list)
-            else tickers
+            " vs. ".join(str(t) for t in strategy.tickers)
+            if isinstance(strategy.tickers, list)
+            else strategy.tickers
         )
+        timestamp_display = strategy.date_created.strftime("%Y-%m-%d %H:%M:%S")
 
-        with st.expander(
-            f"{strategy_name} - {ticker_display} - {date_created.strftime('%Y-%m-%d %H:%M:%S')}"
-        ):
+        with st.expander(f"{strategy.name} - {ticker_display} - {timestamp_display}"):
             col1, col2 = st.columns(2)
 
             with col1:
                 st.subheader("Strategy Details")
-                st.write(f"**Strategy Type:** {strategy_name}")
+                st.write(f"**Strategy Type:** {strategy.name}")
                 st.write(f"**Ticker(s):** {ticker_display}")
-                st.write(
-                    f"**Date Created:** {date_created.strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-                st.write(f"**Start Date:** {start_date}")
-                st.write(f"**End Date:** {end_date}")
+                st.write(f"**Date Created:** {timestamp_display}")
+                st.write(f"**Start Date:** {strategy.start_date}")
+                st.write(f"**End Date:** {strategy.end_date}")
 
                 st.subheader("Parameters")
-                for key, value in (params or {}).items():
+                for key, value in (strategy.parameters or {}).items():
                     st.write(f"**{key}:** {value}")
 
             with col2:
                 st.subheader("Performance Metrics")
-                st.write(f"**Total Return:** {total_return:.2%}")
-                if sharpe_ratio:
-                    st.write(f"**Sharpe Ratio:** {sharpe_ratio:.2f}")
-                else:
-                    st.write("**Sharpe Ratio:** N/A")
-                st.write(f"**Max Drawdown:** {max_drawdown:.2%}")
+                st.write(f"**Total Return:** {strategy.total_return:.2%}")
+                st.write(
+                    f"**Sharpe Ratio:** "
+                    f"{_format_historical_sharpe(strategy.sharpe_ratio)}"
+                )
+                st.write(f"**Max Drawdown:** {strategy.max_drawdown:.2%}")
 
             st.write("---")
 
@@ -818,12 +828,22 @@ def main():
 
     # Save only the final backtest result, and only once per unique
     # combination of inputs (not on every Streamlit rerun).
-    _save_key = f"{strategy_type}:{strategy_params}:{tickers}"
+    strategy_store = _get_strategy_store()
+    _save_key = _build_save_key(
+        strategy_type,
+        strategy_params,
+        tickers,
+        start_date,
+        end_date,
+        optimise,
+        walk_forward,
+        auto_select_tickers,
+    )
     if st.session_state.get("_last_saved_key") != _save_key:
         strategy = create_strategy(strategy_type, strategy_params)
         backtester = Backtester(backtest_data, strategy, tickers=tickers)
         backtester.results = results
-        backtester.save_results()
+        backtester.save_results(store=strategy_store)
         st.session_state["_last_saved_key"] = _save_key
 
     if use_validation_data and metrics.get("Trade Events", 1.0) == 0:
@@ -861,7 +881,7 @@ def main():
     )
 
     # Display historical results
-    display_historical_results()
+    display_historical_results(store=strategy_store)
 
 
 if __name__ == "__main__":

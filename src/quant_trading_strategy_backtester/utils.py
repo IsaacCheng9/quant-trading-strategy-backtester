@@ -1,35 +1,28 @@
-"""
-Contains utility code and constants used throughout the project.
-"""
+"""Utility helpers and shared constants used throughout the project."""
 
 import logging
 
-from sqlalchemy import create_engine
-
-from quant_trading_strategy_backtester.models import Base
+from quant_trading_strategy_backtester.models import (
+    DEFAULT_DATABASE_URL,
+    Base,
+    get_engine,
+)
 
 logger = logging.getLogger(__name__)
 NUM_TOP_COMPANIES_ONE_TICKER = 100
 NUM_TOP_COMPANIES_TWO_TICKERS = 20
 
 
-def clear_database():
+def clear_database(database_url: str = DEFAULT_DATABASE_URL) -> None:
+    """Clear all stored strategy rows from the database.
+
+    Drop all tables and recreate them on the target database engine.
+
+    Args:
+        database_url: SQLAlchemy database URL to reset.
     """
-    Utility function to clear all data from the database.
-
-    This function drops all tables and recreates them, effectively clearing all data.
-    Use with caution as this operation cannot be undone.
-
-    Returns:
-        None
-    """
-    # Create engine and connect to the database
-    engine = create_engine("sqlite:///strategies.db")
-
-    # Drop all tables
+    engine = get_engine(database_url)
     Base.metadata.drop_all(engine)
-
-    # Recreate all tables
     Base.metadata.create_all(engine)
 
     logger.info("Database cleared successfully.")

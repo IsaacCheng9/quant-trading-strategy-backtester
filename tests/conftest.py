@@ -2,15 +2,18 @@
 Contains pytest fixtures for tests, such as mock data.
 """
 
+from collections.abc import Iterator
 from typing import Any
 
 import pandas as pd
 import polars as pl
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import sessionmaker
 
 from quant_trading_strategy_backtester.models import Base
+from quant_trading_strategy_backtester.storage import SQLiteStrategyStore
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 
 
@@ -80,20 +83,24 @@ def mock_polars_pairs_data(mock_yfinance_pairs_data: pd.DataFrame) -> pl.DataFra
     return pl.from_pandas(mock_yfinance_pairs_data)
 
 
-@pytest.fixture(scope="function", autouse=True)
-def mock_db_session(monkeypatch):
-    def mock_session():
-        return session
-
+@pytest.fixture
+def session_factory() -> Iterator[sessionmaker[OrmSession]]:
+    """Provide an isolated in-memory SQLite session factory."""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    TestingSessionLocal = sessionmaker(bind=engine)
-    session = TestingSessionLocal()
-    monkeypatch.setattr(
-        "quant_trading_strategy_backtester.models.Session", mock_session
-    )
-    yield session
-    session.close()
+    factory = sessionmaker(bind=engine)
+    try:
+        yield factory
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def sqlite_store(
+    session_factory: sessionmaker[OrmSession],
+) -> SQLiteStrategyStore:
+    """Provide a SQLiteStrategyStore backed by an in-memory database."""
+    return SQLiteStrategyStore(session_factory=session_factory)
 
 
 @pytest.fixture(autouse=True)
