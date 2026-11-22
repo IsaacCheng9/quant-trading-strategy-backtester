@@ -66,7 +66,8 @@ def evaluate_cointegration(
             trend="c",
             autolag="aic",
         )
-    except (ValueError, np.linalg.LinAlgError) as exc:
+    except ValueError as exc:
+        # np.linalg.LinAlgError subclasses ValueError.
         return _failed_result(f"Cointegration test failed: {exc}")
 
     p_value = float(p_value)
