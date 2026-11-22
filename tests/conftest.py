@@ -155,6 +155,8 @@ def mock_yfinance_functions(monkeypatch):
     app._cached_get_top_sp500_companies.clear()
     app._cached_get_full_company_name.clear()
     app._cached_is_same_company.clear()
+    app._cached_run_backtest.clear()
+    app._cached_evaluate_validation_period.clear()
 
 
 @pytest.fixture(autouse=True)

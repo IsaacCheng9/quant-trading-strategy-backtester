@@ -28,10 +28,11 @@ from quant_trading_strategy_backtester.storage import (
     InMemoryStrategyStore,
     SQLiteStrategyStore,
 )
+from quant_trading_strategy_backtester.streamlit_ui import BacktestConfig
 
 
-def test_get_benchmark_date_range_uses_exclusive_yahoo_end_date() -> None:
-    """Verify benchmark loading includes the displayed final backtest date."""
+def test_get_benchmark_date_range_returns_inclusive_dates() -> None:
+    """Verify benchmark loading requests inclusive start and end dates."""
     data = pl.DataFrame(
         {
             "Date": [
@@ -45,11 +46,11 @@ def test_get_benchmark_date_range_uses_exclusive_yahoo_end_date() -> None:
     start_date, end_date = _get_benchmark_date_range(data)
 
     assert start_date == datetime.date(2020, 1, 2)
-    assert end_date == datetime.date(2020, 1, 4)
+    assert end_date == datetime.date(2020, 1, 3)
 
 
-def test_build_save_key_changes_with_dates_and_modes() -> None:
-    """Verify save keys distinguish dates, modes, and canonicalised params."""
+def test_build_save_key_changes_with_dates_modes_and_assumptions() -> None:
+    """Verify save keys distinguish dates, modes, assumptions, and params."""
     base_kwargs = {
         "strategy_type": "Moving Average Crossover",
         "strategy_params": {"short_window": 5, "long_window": 20},
@@ -59,6 +60,9 @@ def test_build_save_key_changes_with_dates_and_modes() -> None:
         "optimise": False,
         "walk_forward": False,
         "auto_select_tickers": False,
+        "initial_capital": 100_000.0,
+        "transaction_cost_bps": 5.0,
+        "slippage_bps": 3.0,
     }
     base_key = _build_save_key(**base_kwargs)
 
@@ -82,6 +86,9 @@ def test_build_save_key_changes_with_dates_and_modes() -> None:
     assert _build_save_key(**{**base_kwargs, "optimise": True}) != base_key
     assert _build_save_key(**{**base_kwargs, "walk_forward": True}) != base_key
     assert _build_save_key(**{**base_kwargs, "auto_select_tickers": True}) != base_key
+    assert _build_save_key(**{**base_kwargs, "initial_capital": 250_000.0}) != base_key
+    assert _build_save_key(**{**base_kwargs, "transaction_cost_bps": 10.0}) != base_key
+    assert _build_save_key(**{**base_kwargs, "slippage_bps": 8.0}) != base_key
 
 
 def test_format_historical_sharpe() -> None:
@@ -156,7 +163,7 @@ def test_get_benchmark_date_range_starts_from_prior_date() -> None:
     )
 
     assert start_date == datetime.date(2020, 1, 3)
-    assert end_date == datetime.date(2020, 1, 8)
+    assert end_date == datetime.date(2020, 1, 7)
 
 
 def test_get_prior_date_returns_previous_date_for_validation_slice() -> None:
@@ -216,7 +223,7 @@ def test_display_benchmark_comparison_passes_prior_date_for_validation(
 
     _display_benchmark_comparison(results, validation_data, full_data=full_data)
 
-    assert loaded_range == [(datetime.date(2020, 1, 1), datetime.date(2020, 1, 5))]
+    assert loaded_range == [(datetime.date(2020, 1, 1), datetime.date(2020, 1, 4))]
     assert len(displayed_metrics) == 1
     assert displayed_metrics[0]["Benchmark Observations"] == 3
     assert displayed_metrics[0]["Benchmark Total Return"] == pytest.approx(
@@ -517,14 +524,22 @@ def test_main_displays_and_saves_stitched_walk_forward_results(monkeypatch) -> N
     expected_results, _ = stitch_walk_forward_oos_results(fold_results)
 
     captured: dict[str, Any] = {}
-
-    monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.get_user_inputs_except_strategy_params",
-        lambda: ("AAPL", dates[0], dates[-1], "Moving Average Crossover", False),
+    fake_session_state: dict[str, Any] = {}
+    config = BacktestConfig(
+        ticker="AAPL",
+        start_date=dates[0],
+        end_date=dates[-1],
+        strategy_type="Moving Average Crossover",
+        auto_select_tickers=False,
+        optimise=True,
+        walk_forward=True,
+        strategy_params=param_ranges,
     )
+
+    monkeypatch.setattr(app.st, "session_state", fake_session_state)
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.app.get_user_inputs_for_strategy_params",
-        lambda *_args, **_kwargs: (True, True, param_ranges),
+        "quant_trading_strategy_backtester.app.get_sidebar_inputs",
+        lambda: (config, True),
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
@@ -702,3 +717,228 @@ def test_walk_forward_status_callback_uses_custom_n_folds() -> None:
     assert len(messages) == 1
     assert "3 expanding walk-forward folds" in messages[0]
     assert "stitched out-of-sample" in messages[0]
+
+
+def test_main_persists_active_config_and_threads_trading_assumptions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify form submit gates reruns and threads trading assumptions."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(15)]
+    data = pl.DataFrame({"Date": dates, "Close": [100.0 + i * 1.0 for i in range(15)]})
+    fake_session_state: dict[str, Any] = {}
+    sidebar_infos: list[str] = []
+    saved_assumptions: list[tuple[float, float, float]] = []
+    equity_starts: list[float] = []
+
+    initial_config = BacktestConfig(
+        ticker="AAPL",
+        start_date=dates[0],
+        end_date=dates[-1],
+        strategy_type="Buy and Hold",
+        auto_select_tickers=False,
+        optimise=False,
+        walk_forward=False,
+        strategy_params={},
+        initial_capital=100_000.0,
+        transaction_cost_bps=5.0,
+        slippage_bps=3.0,
+    )
+    unsubmitted_config = BacktestConfig(
+        ticker="MSFT",
+        start_date=dates[0],
+        end_date=dates[-1],
+        strategy_type="Mean Reversion",
+        auto_select_tickers=False,
+        optimise=True,
+        walk_forward=False,
+        strategy_params={"window": [5, 10], "std_dev": [1.5, 2.0]},
+        initial_capital=250_000.0,
+        transaction_cost_bps=25.0,
+        slippage_bps=15.0,
+    )
+    submitted_config = BacktestConfig(
+        ticker="AAPL",
+        start_date=dates[0],
+        end_date=dates[-1],
+        strategy_type="Buy and Hold",
+        auto_select_tickers=False,
+        optimise=False,
+        walk_forward=False,
+        strategy_params={},
+        initial_capital=250_000.0,
+        transaction_cost_bps=25.0,
+        slippage_bps=15.0,
+    )
+    sidebar_responses = iter(
+        [
+            (initial_config, False),
+            (unsubmitted_config, False),
+            (submitted_config, True),
+        ]
+    )
+
+    monkeypatch.setattr(app.st, "session_state", fake_session_state)
+    monkeypatch.setattr(app.st.sidebar, "info", sidebar_infos.append)
+    monkeypatch.setattr(app, "get_sidebar_inputs", lambda: next(sidebar_responses))
+    monkeypatch.setattr(
+        app,
+        "load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: data,
+    )
+    monkeypatch.setattr(app, "get_full_company_name", lambda t: f"{t} Inc.")
+    monkeypatch.setattr(
+        app,
+        "_run_optimisation_with_ui",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Unsubmitted layout toggle must not trigger optimisation"
+        ),
+    )
+    monkeypatch.setattr(app, "display_performance_metrics", lambda *_a, **_k: None)
+    monkeypatch.setattr(app, "_display_benchmark_comparison", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        app,
+        "plot_equity_curve",
+        lambda results, *_a, **_k: equity_starts.append(
+            float(results["equity_curve"][0])
+        ),
+    )
+    monkeypatch.setattr(app, "plot_strategy_returns", lambda *_a, **_k: None)
+    monkeypatch.setattr(app, "display_returns_by_month", lambda *_a, **_k: None)
+    monkeypatch.setattr(app, "display_trade_ledger", lambda *_a, **_k: None)
+    monkeypatch.setattr(app, "display_historical_results", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        app.Backtester,
+        "save_results",
+        lambda self, store=None: saved_assumptions.append(
+            (
+                self.initial_capital,
+                self.transaction_cost_bps,
+                self.slippage_bps,
+            )
+        ),
+    )
+
+    # First visit runs initial config automatically.
+    app.main()
+    assert fake_session_state["active_backtest_config"] == initial_config
+    assert saved_assumptions == [(100_000.0, 5.0, 3.0)]
+
+    # Toggling controls outside the form does not execute unsubmitted config.
+    app.main()
+    assert fake_session_state["active_backtest_config"] == initial_config
+    assert len(sidebar_infos) == 1
+    assert "Run Backtest" in sidebar_infos[0]
+    assert saved_assumptions == [(100_000.0, 5.0, 3.0)]
+
+    # Clicking Run Backtest applies the updated trading assumptions and saves.
+    app.main()
+    assert fake_session_state["active_backtest_config"] == submitted_config
+    assert saved_assumptions == [
+        (100_000.0, 5.0, 3.0),
+        (250_000.0, 25.0, 15.0),
+    ]
+    assert equity_starts[0] == pytest.approx(100_000.0 * (1 - 0.0008))
+    assert equity_starts[2] == pytest.approx(250_000.0 * (1 - 0.004))
+
+
+@pytest.mark.parametrize(
+    "start_date,end_date",
+    [
+        (datetime.date(2020, 6, 1), datetime.date(2020, 6, 1)),
+        (datetime.date(2020, 6, 2), datetime.date(2020, 6, 1)),
+    ],
+)
+def test_main_shows_error_and_returns_early_on_invalid_date_range(
+    monkeypatch: pytest.MonkeyPatch,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> None:
+    """Verify app.main rejects start_date >= end_date before fetching data."""
+    errors: list[str] = []
+    config = BacktestConfig(
+        ticker="AAPL",
+        start_date=start_date,
+        end_date=end_date,
+        strategy_type="Buy and Hold",
+        auto_select_tickers=False,
+        optimise=False,
+        walk_forward=False,
+        strategy_params={},
+    )
+    monkeypatch.setattr(app.st, "session_state", {})
+    monkeypatch.setattr(app.st, "error", errors.append)
+    monkeypatch.setattr(app, "get_sidebar_inputs", lambda: (config, True))
+    monkeypatch.setattr(
+        app,
+        "_cached_load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: pytest.fail("Should not load data on invalid dates"),
+    )
+
+    app.main()
+
+    assert len(errors) == 1
+    assert "Start date must be earlier than end date" in errors[0]
+
+
+def test_main_shows_error_on_invalid_fixed_strategy_params(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify app.main validates fixed strategy params submitted via form."""
+    errors: list[str] = []
+    config = BacktestConfig(
+        ticker="AAPL",
+        start_date=datetime.date(2020, 1, 1),
+        end_date=datetime.date(2020, 12, 31),
+        strategy_type="Moving Average Crossover",
+        auto_select_tickers=False,
+        optimise=False,
+        walk_forward=False,
+        strategy_params={"short_window": 40, "long_window": 20},
+    )
+    monkeypatch.setattr(app.st, "session_state", {})
+    monkeypatch.setattr(app.st, "error", errors.append)
+    monkeypatch.setattr(app, "get_sidebar_inputs", lambda: (config, True))
+    monkeypatch.setattr(
+        app,
+        "_cached_load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: pytest.fail("Should not load data on invalid params"),
+    )
+
+    app.main()
+
+    assert len(errors) == 1
+    assert "short_window must be less than long_window" in errors[0]
+
+
+def test_prepare_single_ticker_strategy_buy_and_hold_ignores_optimise_flag(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify pruned Buy and Hold branch does not run ticker optimisation."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(5)]
+    data = pl.DataFrame({"Date": dates, "Close": [100.0 + i for i in range(5)]})
+    monkeypatch.setattr(
+        app,
+        "load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: data,
+    )
+    monkeypatch.setattr(
+        app,
+        "optimise_buy_and_hold_ticker",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Buy and Hold manual prep should not run S&P 500 ticker selection"
+        ),
+    )
+
+    returned_data, ticker_display, params, wf_oos = prepare_single_ticker_strategy(
+        "AAPL",
+        dates[0],
+        dates[-1],
+        "Buy and Hold",
+        {},
+        optimise=True,
+    )
+
+    assert returned_data.equals(data)
+    assert ticker_display == "AAPL"
+    assert params == {}
+    assert wf_oos is None

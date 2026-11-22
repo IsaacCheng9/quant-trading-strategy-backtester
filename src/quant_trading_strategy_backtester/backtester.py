@@ -19,6 +19,11 @@ from quant_trading_strategy_backtester.storage import (
     StrategyStore,
 )
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+from quant_trading_strategy_backtester.utils import (
+    DEFAULT_INITIAL_CAPITAL,
+    DEFAULT_SLIPPAGE_BPS,
+    DEFAULT_TRANSACTION_COST_BPS,
+)
 
 TRADING_DAYS_PER_YEAR = 252
 
@@ -287,9 +292,9 @@ class Backtester:
         self,
         data: pl.DataFrame,
         strategy: BaseStrategy,
-        initial_capital: float = 100000.0,
-        transaction_cost_bps: float = 5.0,
-        slippage_bps: float = 3.0,
+        initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+        transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+        slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
         tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data
@@ -595,7 +600,16 @@ class Backtester:
         if metrics is None:
             raise ValueError("Backtest produced no performance metrics.")
 
-        strategy_params = self.strategy.get_parameters()
+        strategy_params = dict(self.strategy.get_parameters())
+        # Include non-default trading assumptions so persistence deduplication
+        # distinguishes runs with different capital, fees, or slippage while
+        # remaining backward-compatible with existing default records.
+        if self.initial_capital != DEFAULT_INITIAL_CAPITAL:
+            strategy_params["initial_capital"] = self.initial_capital
+        if self.transaction_cost_bps != DEFAULT_TRANSACTION_COST_BPS:
+            strategy_params["transaction_cost_bps"] = self.transaction_cost_bps
+        if self.slippage_bps != DEFAULT_SLIPPAGE_BPS:
+            strategy_params["slippage_bps"] = self.slippage_bps
         strategy_name = self.strategy.__class__.__name__
 
         start_date_row = self.data.select(

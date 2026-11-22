@@ -40,7 +40,12 @@ from quant_trading_strategy_backtester.strategies.pairs_trading import (
 from quant_trading_strategy_backtester.strategy_params import (
     is_valid_strategy_params,
 )
-from quant_trading_strategy_backtester.utils import NUM_TOP_COMPANIES_ONE_TICKER
+from quant_trading_strategy_backtester.utils import (
+    DEFAULT_INITIAL_CAPITAL,
+    DEFAULT_SLIPPAGE_BPS,
+    DEFAULT_TRANSACTION_COST_BPS,
+    NUM_TOP_COMPANIES_ONE_TICKER,
+)
 
 TRAIN_RATIO = 0.7
 WALK_FORWARD_FOLDS = 5
@@ -152,7 +157,9 @@ def evaluate_validation_period(
     strategy_type: str,
     strategy_params: dict[str, Any],
     tickers: str | list[str],
-    initial_capital: float = 100000.0,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, dict[str, float]]:
     """Evaluate validation rows while preserving prior strategy state.
 
@@ -167,6 +174,8 @@ def evaluate_validation_period(
         strategy_params: Scalar parameters for the selected strategy.
         tickers: The ticker or tickers used in the backtest.
         initial_capital: Capital used to reset the validation equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         Validation-period results and performance metrics.
@@ -182,6 +191,9 @@ def evaluate_validation_period(
         strategy_type,
         strategy_params,
         tickers,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
     validation_dates = validation_data.select(pl.col("Date").unique())
     validation_results = context_results.join(validation_dates, on="Date", how="inner")
@@ -197,6 +209,8 @@ def evaluate_validation_period(
         validation_data,
         strategy,
         initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
         tickers=tickers,
     )
     backtester.results = validation_results
@@ -280,6 +294,9 @@ def run_walk_forward_optimisation(
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
     fold_results_callback: Callable[[list[dict[str, Any]]], None] | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[dict[str, int | float], pl.DataFrame, dict[str, float]]:
     """Run walk-forward optimisation and return stitched OOS results.
 
@@ -295,6 +312,9 @@ def run_walk_forward_optimisation(
             messages.
         fold_results_callback: Optional callback invoked with per-fold
             walk-forward results.
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing the final-fold optimal parameters, stitched
@@ -308,8 +328,16 @@ def run_walk_forward_optimisation(
         n_folds=n_folds,
         progress_callback=progress_callback,
         status_callback=status_callback,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
-    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(fold_results)
+    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(
+        fold_results,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+    )
     if fold_results_callback is not None:
         fold_results_callback(fold_results)
 
@@ -330,6 +358,9 @@ def run_optimisation(
     load_one_ticker: Callable[[str, datetime.date, datetime.date], pl.DataFrame | None]
     | None = None,
     get_top_companies: Callable[[int], list[tuple[str, float]]] | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """Run optimisation for strategy parameters or ticker selection.
 
@@ -350,6 +381,9 @@ def run_optimisation(
         load_one_ticker: Optional single-ticker loader override (for caching).
         get_top_companies: Optional top-companies loader override (for
             caching).
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -370,6 +404,9 @@ def run_optimisation(
             progress_callback=progress_callback,
             status_callback=status_callback,
             load_one_ticker=load_one_ticker,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
         if status_callback is not None:
             status_callback(f"Best ticker for Buy and Hold: {best_ticker}")
@@ -381,6 +418,9 @@ def run_optimisation(
             tickers,
             progress_callback=progress_callback,
             status_callback=status_callback,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
         if fold_results_callback is not None:
             fold_results_callback(fold_results)
@@ -394,6 +434,9 @@ def run_optimisation(
             test_data=test_data,
             progress_callback=progress_callback,
             status_callback=status_callback,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     return strategy_params, metrics
@@ -407,6 +450,9 @@ def optimise_buy_and_hold_ticker(
     status_callback: StatusCallback | None = None,
     load_one_ticker: Callable[[str, datetime.date, datetime.date], pl.DataFrame | None]
     | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[str, dict[str, Any], dict[str, float]]:
     """Optimise ticker selection for the Buy and Hold strategy.
 
@@ -422,6 +468,9 @@ def optimise_buy_and_hold_ticker(
             (current, total, message) for each candidate ticker.
         status_callback: Optional callback invoked with summary messages.
         load_one_ticker: Optional single-ticker loader override (for caching).
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing the best ticker, strategy parameters, and
@@ -454,7 +503,14 @@ def optimise_buy_and_hold_ticker(
         evaluated_tickers += 1
         train_data, test_data = _split_data(data)
 
-        backtester = Backtester(train_data, BuyAndHoldStrategy({}), tickers=ticker)
+        backtester = Backtester(
+            train_data,
+            BuyAndHoldStrategy({}),
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+            tickers=ticker,
+        )
         backtester.run()
         train_metrics = backtester.get_performance_metrics()
 
@@ -477,7 +533,14 @@ def optimise_buy_and_hold_ticker(
     if not best_ticker or best_test_data is None:
         raise ValueError("Buy and Hold optimisation failed")
 
-    backtester = Backtester(best_test_data, BuyAndHoldStrategy({}), tickers=best_ticker)
+    backtester = Backtester(
+        best_test_data,
+        BuyAndHoldStrategy({}),
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        tickers=best_ticker,
+    )
     backtester.run()
     best_test_metrics = backtester.get_performance_metrics()
     if best_test_metrics is None:
@@ -496,11 +559,14 @@ def optimise_single_ticker_strategy_ticker(
     status_callback: StatusCallback | None = None,
     load_one_ticker: Callable[[str, datetime.date, datetime.date], pl.DataFrame | None]
     | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> str:
     """Optimise ticker selection for single-ticker strategies.
 
     Use a 70/30 train/test split and rank tickers by Sharpe ratio on training
-    data.
+    data using the first valid parameter combination.
 
     Args:
         top_companies: List of tuples containing ticker symbols and market
@@ -508,14 +574,21 @@ def optimise_single_ticker_strategy_ticker(
         start_date: Start date for historical data.
         end_date: End date for historical data.
         strategy_type: The type of strategy being used.
-        strategy_params: Strategy parameters.
+        strategy_params: Strategy parameters or parameter ranges.
         progress_callback: Optional callback invoked as
             (current, total, message) for each candidate ticker.
         status_callback: Optional callback invoked with summary messages.
         load_one_ticker: Optional single-ticker loader override (for caching).
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         The best ticker.
+
+    Raises:
+        ValueError: If strategy_params yields no valid parameter combination
+            or no candidate produces a finite Sharpe ratio.
     """
     best_ticker = None
     best_sharpe_ratio = float("-inf")
@@ -528,11 +601,8 @@ def optimise_single_ticker_strategy_ticker(
 
     total_tickers = len(top_companies)
 
-    # Use fixed parameter values for ticker evaluation.
-    fixed_params = {
-        k: v[0] if isinstance(v, (list, range)) else v
-        for k, v in strategy_params.items()
-    }
+    # Pick the first valid scalar parameter combination for ticker ranking.
+    fixed_params = _first_valid_parameter_combination(strategy_type, strategy_params)
 
     for i, (ticker, _) in enumerate(top_companies):
         if progress_callback is not None:
@@ -548,7 +618,15 @@ def optimise_single_ticker_strategy_ticker(
 
         evaluated_tickers += 1
         train_data, _ = _split_data(data)
-        _, train_metrics = run_backtest(train_data, strategy_type, fixed_params, ticker)
+        _, train_metrics = run_backtest(
+            train_data,
+            strategy_type,
+            fixed_params,
+            ticker,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+        )
 
         score = _optimisation_score(train_metrics)
         if score is not None and score > best_sharpe_ratio:
@@ -576,6 +654,9 @@ def optimise_strategy_params(
     test_data: pl.DataFrame | None = None,
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[dict[str, int | float], dict[str, float]]:
     """Optimise strategy parameters across all valid grid combinations.
 
@@ -594,6 +675,9 @@ def optimise_strategy_params(
             (current, total, message) for each parameter combination.
         status_callback: Optional callback invoked with search context
             messages.
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing the best parameters and their performance metrics.
@@ -630,7 +714,15 @@ def optimise_strategy_params(
                 f"Evaluating parameter combination {i + 1} / {total_combinations}",
             )
 
-        _, metrics = run_backtest(data, strategy_type, current_params, tickers)
+        _, metrics = run_backtest(
+            data,
+            strategy_type,
+            current_params,
+            tickers,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+        )
 
         score = _optimisation_score(metrics)
         if score is not None and score > best_sharpe_ratio:
@@ -650,6 +742,9 @@ def optimise_strategy_params(
             strategy_type,
             best_params,
             tickers,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
         return best_params, test_metrics
 
@@ -670,6 +765,9 @@ def optimise_pairs_trading_tickers(
     ]
     | None = None,
     same_company_check: Callable[[str, str], bool] | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[tuple[str, str], dict[str, Any], dict[str, float]]:
     """Optimise ticker pair selection and parameters for pairs trading.
 
@@ -692,6 +790,9 @@ def optimise_pairs_trading_tickers(
         load_two_tickers: Optional two-ticker loader override (for caching).
         same_company_check: Optional same-company predicate override (for
             caching).
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing the best ticker pair, best parameters, and best
@@ -764,10 +865,19 @@ def optimise_pairs_trading_tickers(
                     optimisation_parameter_ranges,
                 ),
                 [ticker1, ticker2],
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
         else:
             _, train_metrics = run_backtest(
-                train_data, "Pairs Trading", strategy_params, [ticker1, ticker2]
+                train_data,
+                "Pairs Trading",
+                strategy_params,
+                [ticker1, ticker2],
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
             current_params = strategy_params
 
@@ -816,6 +926,9 @@ def optimise_pairs_trading_tickers(
         "Pairs Trading",
         best_params,
         list(best_pair),
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
 
     return best_pair, best_params, best_metrics
@@ -823,7 +936,9 @@ def optimise_pairs_trading_tickers(
 
 def stitch_walk_forward_oos_results(
     fold_results: list[dict[str, Any]],
-    initial_capital: float = 100000.0,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, dict[str, float]]:
     """Stitch per-fold out-of-sample results into one continuous series.
 
@@ -835,6 +950,8 @@ def stitch_walk_forward_oos_results(
         fold_results: Per-fold result dictionaries containing oos_results
             DataFrames.
         initial_capital: Starting capital for the stitched equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple of (stitched_results, stitched_metrics).
@@ -880,6 +997,8 @@ def stitch_walk_forward_oos_results(
         stitched_results,
         BuyAndHoldStrategy({}),
         initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
     backtester.results = stitched_results
     stitched_metrics = backtester.get_performance_metrics(include_initial_period=True)
@@ -899,6 +1018,9 @@ def walk_forward_optimise(
     n_folds: int = WALK_FORWARD_FOLDS,
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[dict[str, int | float], dict[str, float], list[dict[str, Any]]]:
     """Optimise strategy parameters using walk-forward validation.
 
@@ -921,6 +1043,9 @@ def walk_forward_optimise(
             (current, total, message) for each fold combination evaluation.
         status_callback: Optional callback invoked with search context
             messages.
+        initial_capital: Starting capital for the backtest and equity curve.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -973,7 +1098,13 @@ def walk_forward_optimise(
                     f"{combo_idx + 1} / {total_combinations}",
                 )
             _, metrics = run_backtest(
-                train_data, strategy_type, current_params, tickers
+                train_data,
+                strategy_type,
+                current_params,
+                tickers,
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
             score = _optimisation_score(metrics)
             if score is not None and score > best_sharpe:
@@ -990,6 +1121,9 @@ def walk_forward_optimise(
             strategy_type,
             best_params,
             tickers,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
         fold_results.append(
@@ -1005,12 +1139,40 @@ def walk_forward_optimise(
         )
 
     # Stitch per-fold out-of-sample results into one continuous return stream.
-    _, stitched_metrics = stitch_walk_forward_oos_results(fold_results)
+    _, stitched_metrics = stitch_walk_forward_oos_results(
+        fold_results,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+    )
 
     # Return best params from the final fold (largest training set).
     final_params = fold_results[-1]["params"]
 
     return final_params, stitched_metrics, fold_results
+
+
+def _first_valid_parameter_combination(
+    strategy_type: str,
+    parameter_ranges: Mapping[str, range | list[int | float] | int | float],
+) -> dict[str, int | float]:
+    """Return the first valid scalar parameter combination for a strategy.
+
+    Args:
+        strategy_type: The strategy name.
+        parameter_ranges: Scalar parameters or candidate parameter ranges.
+
+    Returns:
+        The first scalar parameter dictionary that passes strategy validation.
+
+    Raises:
+        ValueError: If no valid parameter combination exists.
+    """
+    valid_combinations = _valid_parameter_combinations(strategy_type, parameter_ranges)
+    if not valid_combinations:
+        raise ValueError(f"No valid parameter combinations for {strategy_type}")
+
+    return valid_combinations[0]
 
 
 def _valid_parameter_combinations(
@@ -1071,21 +1233,34 @@ def run_backtest(
     strategy_type: str,
     strategy_params: dict[str, Any],
     tickers: str | list[str],
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, dict]:
-    """
-    Executes the backtest using the selected strategy and parameters.
+    """Execute a backtest using the selected strategy and trading assumptions.
 
     Args:
         data: Historical stock data.
         strategy_type: The type of strategy to use for the backtest.
         strategy_params: Additional parameters required for the strategy.
         tickers: The ticker or tickers used in the backtest.
+        initial_capital: Starting capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
-        A tuple containing the backtest results DataFrame and performance metrics.
+        A tuple containing the backtest results DataFrame and performance
+        metrics.
     """
     strategy = create_strategy(strategy_type, strategy_params)
-    backtester = Backtester(data, strategy, tickers=tickers)
+    backtester = Backtester(
+        data,
+        strategy,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+        tickers=tickers,
+    )
     results = backtester.run()
     metrics = backtester.get_performance_metrics()
     assert metrics is not None, (

@@ -38,6 +38,7 @@ from quant_trading_strategy_backtester.data import (
 from quant_trading_strategy_backtester.optimiser import (
     WALK_FORWARD_FOLDS,
     ProgressCallback,
+    _first_valid_parameter_combination,
     create_strategy,
     evaluate_validation_period,
     get_training_data,
@@ -55,11 +56,17 @@ from quant_trading_strategy_backtester.storage import (
     SQLiteStrategyStore,
     StrategyStore,
 )
+from quant_trading_strategy_backtester.strategy_params import (
+    validate_strategy_params,
+)
 from quant_trading_strategy_backtester.streamlit_ui import (
-    get_user_inputs_except_strategy_params,
-    get_user_inputs_for_strategy_params,
+    BacktestConfig,
+    get_sidebar_inputs,
 )
 from quant_trading_strategy_backtester.utils import (
+    DEFAULT_INITIAL_CAPITAL,
+    DEFAULT_SLIPPAGE_BPS,
+    DEFAULT_TRANSACTION_COST_BPS,
     NUM_TOP_COMPANIES_ONE_TICKER,
     NUM_TOP_COMPANIES_TWO_TICKERS,
 )
@@ -145,6 +152,9 @@ def _run_optimisation_with_ui(
     end_date: datetime.date,
     tickers: str | list[str],
     walk_forward: bool = False,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """Run optimisation with Streamlit progress and summary widgets."""
     st.info("Optimising strategy. This may take a while...")
@@ -164,6 +174,9 @@ def _run_optimisation_with_ui(
             fold_results_callback=display_walk_forward_results,
             load_one_ticker=_cached_load_yfinance_data_one_ticker,
             get_top_companies=_cached_get_top_sp500_companies,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     duration = time.time() - start_time
@@ -179,6 +192,9 @@ def _run_walk_forward_optimisation_with_ui(
     strategy_params: dict[str, Any],
     tickers: str | list[str],
     n_folds: int = WALK_FORWARD_FOLDS,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[dict[str, int | float], pl.DataFrame, dict[str, float]]:
     """Run walk-forward optimisation with Streamlit progress and widgets."""
     st.info("Optimising strategy. This may take a while...")
@@ -194,6 +210,9 @@ def _run_walk_forward_optimisation_with_ui(
             progress_callback=progress_callback,
             status_callback=_display_status_message,
             fold_results_callback=display_walk_forward_results,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     duration = time.time() - start_time
@@ -209,12 +228,20 @@ def _cached_run_backtest(
     strategy_type: str,
     strategy_params: dict[str, Any],
     tickers: str | list[str],
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, dict]:
-    """
-    Cached wrapper for run_backtest to avoid recomputation on
-    Streamlit reruns.
-    """
-    return run_backtest(data, strategy_type, strategy_params, tickers)
+    """Cache run_backtest results across Streamlit reruns."""
+    return run_backtest(
+        data,
+        strategy_type,
+        strategy_params,
+        tickers,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
+    )
 
 
 @st.cache_data
@@ -224,6 +251,9 @@ def _cached_evaluate_validation_period(
     strategy_type: str,
     strategy_params: dict[str, Any],
     tickers: str | list[str],
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, dict[str, float]]:
     """Cache context-aware validation evaluation across Streamlit reruns."""
     return evaluate_validation_period(
@@ -232,6 +262,9 @@ def _cached_evaluate_validation_period(
         strategy_type,
         strategy_params,
         tickers,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
 
 
@@ -368,7 +401,7 @@ def _get_benchmark_date_range(
     backtest_data: pl.DataFrame,
     prior_date: datetime.date | datetime.datetime | None = None,
 ) -> tuple[datetime.date, datetime.date]:
-    """Return inclusive start and exclusive end dates for benchmark loading.
+    """Return inclusive start and end dates for benchmark loading.
 
     Args:
         backtest_data: Backtest data containing a Date column.
@@ -376,7 +409,7 @@ def _get_benchmark_date_range(
             to include when computing day-0 benchmark returns.
 
     Returns:
-        A start date and Yahoo-compatible exclusive end date.
+        Inclusive start and end dates for load_yfinance_data_one_ticker.
     """
     backtest_start = _to_date(backtest_data["Date"].min())
     start_date = (
@@ -384,7 +417,7 @@ def _get_benchmark_date_range(
         if prior_date is not None
         else backtest_start
     )
-    end_date = _to_date(backtest_data["Date"].max()) + datetime.timedelta(days=1)
+    end_date = _to_date(backtest_data["Date"].max())
     return start_date, end_date
 
 
@@ -422,6 +455,11 @@ def _display_benchmark_comparison(
         benchmark_start_date, benchmark_end_date = _get_benchmark_date_range(
             backtest_data, prior_date=prior_date
         )
+        if benchmark_start_date >= benchmark_end_date:
+            st.warning(
+                "Benchmark comparison unavailable: requires at least two trading days."
+            )
+            return
         benchmark_data = _cached_load_yfinance_data_one_ticker(
             BENCHMARK_TICKER, benchmark_start_date, benchmark_end_date
         )
@@ -467,15 +505,20 @@ def _display_current_universe_warning() -> None:
 def prepare_buy_and_hold_strategy_with_optimisation(
     start_date: datetime.date,
     end_date: datetime.date,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
-    """
-    Handles the optimisation process for Buy and Hold strategy.
+    """Prepare the Buy and Hold strategy with automatic ticker selection.
 
-    Selects the best ticker from the top S&P 500 companies.
+    Select the best ticker from the top S&P 500 companies.
 
     Args:
         start_date: The start date for historical data.
         end_date: The end date for historical data.
+        initial_capital: Starting capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -504,6 +547,9 @@ def prepare_buy_and_hold_strategy_with_optimisation(
             progress_callback=progress_callback,
             status_callback=_display_status_message,
             load_one_ticker=_cached_load_yfinance_data_one_ticker,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     # Calculate and display the time taken for optimisation.
@@ -527,11 +573,13 @@ def prepare_single_ticker_strategy_with_optimisation(
     strategy_params: dict[str, Any],
     optimise: bool,
     walk_forward: bool = False,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, str, dict[str, Any]]:
-    """
-    Handles the optimisation process for single ticker strategies.
+    """Prepare a single-ticker strategy with automatic ticker selection.
 
-    Selects the best ticker from the top S&P 500 companies and optimises
+    Select the best ticker from the top S&P 500 companies and optimise
     strategy parameters if requested.
 
     Args:
@@ -541,6 +589,9 @@ def prepare_single_ticker_strategy_with_optimisation(
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
         walk_forward: Whether to use walk-forward validation.
+        initial_capital: Starting capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -572,6 +623,9 @@ def prepare_single_ticker_strategy_with_optimisation(
             progress_callback=progress_callback,
             status_callback=_display_status_message,
             load_one_ticker=_cached_load_yfinance_data_one_ticker,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     # Load historical data for the selected ticker.
@@ -579,13 +633,12 @@ def prepare_single_ticker_strategy_with_optimisation(
 
     # Optimise strategy parameters if requested.
     if optimise:
-        if not walk_forward:
-            st.warning(
-                "Parameter optimisation without walk-forward validation "
-                "uses a single 70/30 train/test split. Results may still "
-                "be partially in-sample. Enable walk-forward validation "
-                "for more robust out-of-sample evaluation."
-            )
+        st.warning(
+            "Parameter optimisation without walk-forward validation "
+            "uses a single 70/30 train/test split. Results may still "
+            "be partially in-sample. Enable walk-forward validation "
+            "for more robust out-of-sample evaluation."
+        )
         best_params, _ = _run_optimisation_with_ui(
             data,
             strategy_type,
@@ -593,15 +646,15 @@ def prepare_single_ticker_strategy_with_optimisation(
             start_date,
             end_date,
             best_ticker,
-            walk_forward=walk_forward,
+            walk_forward=False,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
     else:
-        best_params = {
-            k: v[0] if isinstance(v, (list, range)) else v
-            for k, v in strategy_params.items()
-        }
+        best_params = _first_valid_parameter_combination(strategy_type, strategy_params)
 
-    # Calculate and display the time taken for optimisation
+    # Calculate and display the time taken for optimisation.
     end_time = time.time()
     duration = end_time - start_time
     st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
@@ -627,12 +680,14 @@ def prepare_pairs_trading_strategy_with_optimisation(
     strategy_params: dict[str, Any],
     optimise: bool,
     walk_forward: bool = False,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[pl.DataFrame, str, dict[str, int | float]]:
-    """
-    Handles the optimisation process for pairs trading strategy.
+    """Prepare the pairs trading strategy with automatic pair selection.
 
-    Selects the best pair of tickers from the top S&P 500 companies and
-    optimises the strategy parameters if requested.
+    Select the best pair of tickers from the top S&P 500 companies and
+    optimise the strategy parameters if requested.
 
     Args:
         start_date: The start date for historical data.
@@ -640,6 +695,9 @@ def prepare_pairs_trading_strategy_with_optimisation(
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
         walk_forward: Whether to use walk-forward validation.
+        initial_capital: Starting capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -649,7 +707,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
     """
     _validate_automatic_selection_mode(walk_forward)
     _display_current_universe_warning()
-    # Inform the user that the optimisation process is starting
+    # Inform the user that the optimisation process is starting.
     st.info(
         f"Ranking pairs from today's top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 "
         "constituents. This may take a while..."
@@ -660,8 +718,6 @@ def prepare_pairs_trading_strategy_with_optimisation(
     # Fetch the top S&P 500 companies.
     with st.spinner("Fetching top S&P 500 companies..."):
         top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_TWO_TICKERS)
-
-    parameter_ranges = strategy_params
 
     # Optimise ticker pair selection and strategy parameters.
     with _streamlit_progress() as progress_callback:
@@ -675,6 +731,9 @@ def prepare_pairs_trading_strategy_with_optimisation(
             status_callback=_display_status_message,
             load_two_tickers=_cached_load_yfinance_data_two_tickers,
             same_company_check=_cached_is_same_company,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
     ticker1, ticker2 = ticker
 
@@ -688,26 +747,14 @@ def prepare_pairs_trading_strategy_with_optimisation(
         "training split used for pair selection",
     )
 
-    if optimise and walk_forward:
-        strategy_params, _ = _run_optimisation_with_ui(
-            data,
-            "Pairs Trading",
-            parameter_ranges,
-            start_date,
-            end_date,
-            [ticker1, ticker2],
-            walk_forward=walk_forward,
-        )
-    elif optimise and not walk_forward:
+    if optimise:
         st.warning(
             "Parameter optimisation without walk-forward validation "
             "uses a single 70/30 train/test split. Results may still "
             "be partially in-sample. Enable walk-forward validation "
             "for more robust out-of-sample evaluation."
         )
-        strategy_params = selected_strategy_params
-    else:
-        strategy_params = selected_strategy_params
+    strategy_params = selected_strategy_params
 
     # Calculate and display the time taken for optimisation.
     end_time = time.time()
@@ -731,6 +778,9 @@ def prepare_pairs_trading_strategy_without_optimisation(
     strategy_params: dict[str, Any],
     optimise: bool,
     walk_forward: bool = False,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[
     pl.DataFrame,
     str,
@@ -749,6 +799,9 @@ def prepare_pairs_trading_strategy_without_optimisation(
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
         walk_forward: Whether to use walk-forward validation.
+        initial_capital: Starting capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -774,6 +827,9 @@ def prepare_pairs_trading_strategy_without_optimisation(
                 "Pairs Trading",
                 strategy_params,
                 [ticker1, ticker2],
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
         )
         walk_forward_oos = (oos_results, oos_metrics)
@@ -786,6 +842,9 @@ def prepare_pairs_trading_strategy_without_optimisation(
             end_date,
             [ticker1, ticker2],
             walk_forward=False,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     return data, ticker_display, strategy_params, walk_forward_oos
@@ -799,6 +858,9 @@ def prepare_single_ticker_strategy(
     strategy_params: dict[str, Any],
     optimise: bool,
     walk_forward: bool = False,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> tuple[
     pl.DataFrame,
     str,
@@ -818,6 +880,9 @@ def prepare_single_ticker_strategy(
         strategy_params: Initial strategy parameters.
         optimise: Whether to optimise strategy parameters.
         walk_forward: Whether to use walk-forward validation.
+        initial_capital: Starting capital for the backtest.
+        transaction_cost_bps: Transaction cost per trade in basis points.
+        slippage_bps: Slippage per trade in basis points.
 
     Returns:
         A tuple containing:
@@ -840,6 +905,9 @@ def prepare_single_ticker_strategy(
                     strategy_type,
                     strategy_params,
                     ticker,
+                    initial_capital=initial_capital,
+                    transaction_cost_bps=transaction_cost_bps,
+                    slippage_bps=slippage_bps,
                 )
             )
             walk_forward_oos = (oos_results, oos_metrics)
@@ -852,21 +920,10 @@ def prepare_single_ticker_strategy(
                 end_date,
                 ticker,
                 walk_forward=False,
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
-    elif optimise and strategy_type == "Buy and Hold":
-        top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
-        with _streamlit_progress() as progress_callback:
-            best_ticker, strategy_params, _ = optimise_buy_and_hold_ticker(
-                top_companies,
-                start_date,
-                end_date,
-                progress_callback=progress_callback,
-                status_callback=_display_status_message,
-                load_one_ticker=_cached_load_yfinance_data_one_ticker,
-            )
-        ticker = best_ticker
-        ticker_display = best_ticker
-        data = _cached_load_yfinance_data_one_ticker(ticker, start_date, end_date)
 
     return data, ticker_display, strategy_params, walk_forward_oos
 
@@ -898,6 +955,9 @@ def _build_save_key(
     optimise: bool,
     walk_forward: bool,
     auto_select_tickers: bool,
+    initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+    transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+    slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
 ) -> str:
     """Build a canonical deduplication key for Streamlit session reruns."""
     payload = {
@@ -909,6 +969,9 @@ def _build_save_key(
         "optimise": optimise,
         "walk_forward": walk_forward,
         "auto_select_tickers": auto_select_tickers,
+        "initial_capital": initial_capital,
+        "transaction_cost_bps": transaction_cost_bps,
+        "slippage_bps": slippage_bps,
     }
     return json.dumps(payload, sort_keys=True, default=str)
 
@@ -981,30 +1044,54 @@ def display_historical_results(store: StrategyStore | None = None) -> None:
             st.write("---")
 
 
-def main():
-    """
-    Orchestrates the Streamlit app flow.
+def main() -> None:
+    """Orchestrate the Streamlit backtesting application flow.
 
-    Sets up the user interface, collects inputs, runs the backtest, and
-    displays the results.
+    Collect sidebar inputs, run the active configuration when submitted or on
+    first load, and display performance metrics, charts, and historical runs.
     """
     st.title("Quant Trading Strategy Backtester")
 
-    # Get user inputs
-    ticker, start_date, end_date, strategy_type, auto_select_tickers = (
-        get_user_inputs_except_strategy_params()
+    # Collect sidebar inputs and persist the active submitted configuration.
+    current_config, submitted = get_sidebar_inputs()
+    active_config = cast(
+        BacktestConfig | None, st.session_state.get("active_backtest_config")
     )
-    optimise, walk_forward, strategy_params = get_user_inputs_for_strategy_params(
-        strategy_type,
-        auto_select_tickers,
-    )
+    if submitted or active_config is None:
+        active_config = current_config
+        st.session_state["active_backtest_config"] = active_config
+    elif current_config != active_config:
+        st.sidebar.info("Click 'Run Backtest' to apply your updated settings.")
+
+    ticker = active_config.ticker
+    start_date = active_config.start_date
+    end_date = active_config.end_date
+    strategy_type = active_config.strategy_type
+    auto_select_tickers = active_config.auto_select_tickers
+    optimise = active_config.optimise
+    walk_forward = active_config.walk_forward
+    strategy_params = active_config.strategy_params
+    initial_capital = active_config.initial_capital
+    transaction_cost_bps = active_config.transaction_cost_bps
+    slippage_bps = active_config.slippage_bps
+
+    if start_date >= end_date:
+        st.error("Start date must be earlier than end date.")
+        return
+
+    if not optimise:
+        try:
+            validate_strategy_params(strategy_type, strategy_params)
+        except ValueError as exc:
+            st.error(str(exc))
+            return
 
     # Initialise company names and optional stitched walk-forward outputs.
     company_name1 = None
     company_name2 = None
     walk_forward_oos: tuple[pl.DataFrame, dict[str, float]] | None = None
 
-    # Prepare the trading strategy based on user inputs
+    # Prepare the trading strategy based on user inputs.
     if strategy_type == "Pairs Trading" and auto_select_tickers:
         data, ticker_display, strategy_params = (
             prepare_pairs_trading_strategy_with_optimisation(
@@ -1013,6 +1100,9 @@ def main():
                 strategy_params,
                 optimise,
                 walk_forward,
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
         )
         # Update company names with the selected pair.
@@ -1028,6 +1118,9 @@ def main():
                 strategy_params,
                 optimise,
                 walk_forward,
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
         )
         ticker1, ticker2 = cast(tuple[str, str], ticker)
@@ -1046,6 +1139,9 @@ def main():
                 strategy_params,
                 optimise,
                 walk_forward,
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
         )
         company_name1 = _cached_get_full_company_name(ticker_display)
@@ -1059,6 +1155,9 @@ def main():
                 strategy_params,
                 optimise,
                 walk_forward,
+                initial_capital=initial_capital,
+                transaction_cost_bps=transaction_cost_bps,
+                slippage_bps=slippage_bps,
             )
         )
         company_name1 = _cached_get_full_company_name(ticker_display)
@@ -1067,13 +1166,13 @@ def main():
         st.write("No data available for the selected ticker and date range")
         return
 
-    # Create a display name for the company or companies
+    # Create a display name for the company or companies.
     if company_name2:
         company_display = f"{company_name1} vs. {company_name2}"
     else:
         company_display = company_name1
 
-    # Run the backtest and display the results
+    # Run the backtest and display the results.
     tickers = (
         ticker_display.split(" vs. ")
         if strategy_type == "Pairs Trading"
@@ -1100,6 +1199,9 @@ def main():
             strategy_type,
             strategy_params,
             tickers,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
     else:
         results, metrics = _cached_run_backtest(
@@ -1107,6 +1209,9 @@ def main():
             strategy_type,
             strategy_params,
             tickers,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
         )
 
     # Save only the final backtest result, and only once per unique
@@ -1121,10 +1226,20 @@ def main():
         optimise,
         walk_forward,
         auto_select_tickers,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        slippage_bps=slippage_bps,
     )
     if st.session_state.get("_last_saved_key") != _save_key:
         strategy = create_strategy(strategy_type, strategy_params)
-        backtester = Backtester(backtest_data, strategy, tickers=tickers)
+        backtester = Backtester(
+            backtest_data,
+            strategy,
+            initial_capital=initial_capital,
+            transaction_cost_bps=transaction_cost_bps,
+            slippage_bps=slippage_bps,
+            tickers=tickers,
+        )
         backtester.results = results
         backtester.save_results(store=strategy_store)
         st.session_state["_last_saved_key"] = _save_key
