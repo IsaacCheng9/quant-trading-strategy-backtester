@@ -41,7 +41,7 @@ def test_build_valid_param_combinations_filters_invalid_combos() -> None:
 
 
 def test_run_single_backtest_succeeds_for_all_valid_param_combinations() -> None:
-    """Verify every valid parameter combination executes cleanly on pair data."""
+    """Verify every valid parameter combo executes cleanly on pair data."""
     benchmark = _load_benchmark_module()
     combinations = benchmark.build_valid_param_combinations(benchmark.PARAM_RANGES)
 
@@ -101,7 +101,7 @@ def test_download_pair_data_preserves_order_and_uses_auto_adjust(
 def test_download_pair_data_handles_ticker_first_multiindex(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify download_pair_data supports (ticker, 'Close') MultiIndex order."""
+    """Verify download_pair_data handles (ticker, 'Close') MultiIndex."""
     benchmark = _load_benchmark_module()
     dates = pd.date_range(start="2020-01-01", end="2020-01-03")
 
@@ -121,3 +121,62 @@ def test_download_pair_data_handles_ticker_first_multiindex(
     assert isinstance(result, pl.DataFrame)
     assert result["Close_1"].to_list() == [300.0, 301.0, 302.0]
     assert result["Close_2"].to_list() == [200.0, 201.0, 202.0]
+
+
+@pytest.mark.parametrize(
+    "raw_frame",
+    [
+        pd.DataFrame(),
+        pd.DataFrame(
+            {"Close": [100.0, 101.0]},
+            index=pd.date_range(start="2020-01-01", end="2020-01-02"),
+        ),
+        pd.DataFrame(
+            [[200.0, 300.0], [201.0, 301.0]],
+            index=pd.date_range(start="2020-01-01", end="2020-01-02"),
+            columns=pd.MultiIndex.from_tuples([("Close", "MSFT"), ("Open", "TSLA")]),
+        ),
+        pd.DataFrame(
+            [[200.0, 300.0, 305.0], [201.0, 301.0, 306.0]],
+            index=pd.date_range(start="2020-01-01", end="2020-01-02"),
+            columns=pd.MultiIndex.from_tuples(
+                [("Close", "MSFT"), ("Close", "TSLA"), ("TSLA", "Close")]
+            ),
+        ),
+        pd.DataFrame(
+            [[float("nan"), 300.0], [201.0, float("nan")]],
+            index=pd.date_range(start="2020-01-01", end="2020-01-02"),
+            columns=pd.MultiIndex.from_tuples([("Close", "MSFT"), ("Close", "TSLA")]),
+        ),
+    ],
+)
+def test_download_pair_data_returns_none_for_invalid_responses(
+    monkeypatch: pytest.MonkeyPatch,
+    raw_frame: pd.DataFrame,
+) -> None:
+    """Verify download_pair_data returns None for malformed or empty data."""
+    benchmark = _load_benchmark_module()
+    monkeypatch.setattr(benchmark.yf, "download", lambda *args, **kwargs: raw_frame)
+
+    assert benchmark.download_pair_data("TSLA", "MSFT") is None
+
+
+def test_download_pair_data_drops_partial_null_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify download_pair_data drops rows with partial NaN close prices."""
+    benchmark = _load_benchmark_module()
+    dates = pd.date_range(start="2020-01-01", end="2020-01-03")
+    raw_frame = pd.DataFrame(
+        [[200.0, 300.0], [float("nan"), 301.0], [202.0, 302.0]],
+        index=dates,
+        columns=pd.MultiIndex.from_tuples([("Close", "MSFT"), ("Close", "TSLA")]),
+    )
+    monkeypatch.setattr(benchmark.yf, "download", lambda *args, **kwargs: raw_frame)
+
+    result = benchmark.download_pair_data("TSLA", "MSFT")
+
+    assert isinstance(result, pl.DataFrame)
+    assert result.height == 2
+    assert result["Close_1"].to_list() == [300.0, 302.0]
+    assert result["Close_2"].to_list() == [200.0, 202.0]
