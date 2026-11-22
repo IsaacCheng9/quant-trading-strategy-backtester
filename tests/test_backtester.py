@@ -1031,3 +1031,42 @@ def test_get_performance_metrics_excludes_cold_start_row_from_risk_ratios() -> N
     assert math.isnan(single_metrics["Sharpe Ratio"])
     assert math.isnan(single_metrics["Sortino Ratio"])
 
+
+def test_backtester_clamps_bankrupt_equity_at_zero() -> None:
+    """Verify >100% single-day loss absorbs cumulative equity at zero."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(5)]
+    # Short entry on day 1; day 2 jumps +150% (-150% short loss), followed by
+    # -20% and +50% moves that must not revive bankrupt equity.
+    data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close": [100.0, 100.0, 250.0, 200.0, 300.0],
+        }
+    )
+    strategy = MockHoldingStrategy({"signals": [0.0, -1.0, -1.0, -1.0, -1.0]})
+    backtester = Backtester(
+        data,
+        strategy,
+        initial_capital=100_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+
+    results = backtester.run()
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    assert results["gross_cumulative_returns"].to_list() == pytest.approx(
+        [1.0, 1.0, 0.0, 0.0, 0.0]
+    )
+    assert results["cumulative_returns"].to_list() == pytest.approx(
+        [1.0, 1.0, 0.0, 0.0, 0.0]
+    )
+    assert results["equity_curve"].to_list() == pytest.approx(
+        [100_000.0, 100_000.0, 0.0, 0.0, 0.0]
+    )
+    assert (results["equity_curve"] >= 0.0).all()
+    assert metrics["Total Return"] == pytest.approx(-1.0)
+    assert metrics["Gross Total Return"] == pytest.approx(-1.0)
+    assert metrics["Max Drawdown"] == pytest.approx(-1.0)
+    assert math.isnan(metrics["Calmar Ratio"])

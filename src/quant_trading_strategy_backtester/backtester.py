@@ -481,15 +481,13 @@ class Backtester:
 
     def _add_cumulative_returns(self, portfolio: pl.LazyFrame) -> pl.DataFrame:
         """Add cumulative returns and equity curve columns."""
+        gross_growth = (1 + pl.col("gross_strategy_returns")).clip(lower_bound=0.0)
+        net_growth = (1 + pl.col("strategy_returns")).clip(lower_bound=0.0)
         result = portfolio.with_columns(
             [
-                (1 + pl.col("gross_strategy_returns"))
-                .cum_prod()
-                .alias("gross_cumulative_returns"),
-                (1 + pl.col("strategy_returns")).cum_prod().alias("cumulative_returns"),
-                (
-                    self.initial_capital * (1 + pl.col("strategy_returns")).cum_prod()
-                ).alias("equity_curve"),
+                gross_growth.cum_prod().alias("gross_cumulative_returns"),
+                net_growth.cum_prod().alias("cumulative_returns"),
+                (self.initial_capital * net_growth.cum_prod()).alias("equity_curve"),
                 pl.col("transaction_costs")
                 .cum_sum()
                 .alias("cumulative_transaction_costs"),

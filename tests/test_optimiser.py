@@ -3134,3 +3134,44 @@ def test_fold_transitions_handle_int64_signals_unsorted_dates_and_nulls(
         leg_1_weight=0.0,
         leg_2_weight=0.0,
     )
+
+
+def test_stitch_walk_forward_oos_results_clamps_bankruptcy_at_zero() -> None:
+    """Verify stitched OOS equity absorbs at zero after a >100% loss."""
+    fold1 = _make_fold_oos_results(
+        datetime.date(2020, 1, 1),
+        [0.10, -1.25, 0.50],
+        [1.0, 0.0, 0.0],
+        cost_rate=0.0,
+    )
+    fold2 = _make_fold_oos_results(
+        datetime.date(2020, 1, 4),
+        [-0.30, 0.40],
+        [0.0, 0.0],
+        cost_rate=0.0,
+    )
+
+    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(
+        [
+            {"fold": 1, "oos_results": fold1},
+            {"fold": 2, "oos_results": fold2},
+        ],
+        initial_capital=100_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+
+    assert stitched_results["gross_cumulative_returns"].to_list() == pytest.approx(
+        [1.1, 0.0, 0.0, 0.0, 0.0]
+    )
+    assert stitched_results["cumulative_returns"].to_list() == pytest.approx(
+        [1.1, 0.0, 0.0, 0.0, 0.0]
+    )
+    assert stitched_results["equity_curve"].to_list() == pytest.approx(
+        [110_000.0, 0.0, 0.0, 0.0, 0.0]
+    )
+    assert (stitched_results["equity_curve"] >= 0.0).all()
+    assert stitched_metrics["Total Return"] == pytest.approx(-1.0)
+    assert stitched_metrics["Gross Total Return"] == pytest.approx(-1.0)
+    assert stitched_metrics["Max Drawdown"] == pytest.approx(-1.0)
+    assert math.isnan(stitched_metrics["Calmar Ratio"])
