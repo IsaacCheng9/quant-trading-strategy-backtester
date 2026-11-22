@@ -73,11 +73,8 @@ def calculate_benchmark_relative_metrics(
     aligned_returns = (
         strategy_returns_data.join(benchmark_returns, on="Date", how="inner")
         .filter(
-            (
-                pl.col("strategy_previous_date").is_null()
-                & pl.col("benchmark_previous_date").is_null()
-            )
-            | (pl.col("strategy_previous_date") == pl.col("benchmark_previous_date"))
+            pl.col("strategy_previous_date").is_not_null()
+            & (pl.col("strategy_previous_date") == pl.col("benchmark_previous_date"))
         )
         .drop_nulls(["strategy_returns", "benchmark_returns"])
         .sort("Date")

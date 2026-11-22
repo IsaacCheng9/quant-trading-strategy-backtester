@@ -32,16 +32,19 @@ def test_calculate_benchmark_relative_metrics() -> None:
 
     metrics = calculate_benchmark_relative_metrics(strategy_results, benchmark_data)
 
-    strategy_total_return = float(np.prod(1 + strategy_returns) - 1)
-    benchmark_total_return = float(np.prod(1 + benchmark_returns) - 1)
-    beta = float(np.cov(strategy_returns, benchmark_returns)[0, 1]) / float(
-        np.var(benchmark_returns, ddof=1)
+    # Cold-start row 0 has no prior return period and is excluded.
+    aligned_strategy = strategy_returns[1:]
+    aligned_benchmark = benchmark_returns[1:]
+    strategy_total_return = float(np.prod(1 + aligned_strategy) - 1)
+    benchmark_total_return = float(np.prod(1 + aligned_benchmark) - 1)
+    beta = float(np.cov(aligned_strategy, aligned_benchmark)[0, 1]) / float(
+        np.var(aligned_benchmark, ddof=1)
     )
     alpha = float(
-        (np.mean(strategy_returns) - beta * np.mean(benchmark_returns))
+        (np.mean(aligned_strategy) - beta * np.mean(aligned_benchmark))
         * TRADING_DAYS_PER_YEAR
     )
-    active_returns = strategy_returns - benchmark_returns
+    active_returns = aligned_strategy - aligned_benchmark
     information_ratio = float(
         (TRADING_DAYS_PER_YEAR**0.5)
         * float(np.mean(active_returns))
@@ -58,7 +61,7 @@ def test_calculate_benchmark_relative_metrics() -> None:
     assert metrics["Beta"] == pytest.approx(beta)
     assert metrics["Alpha"] == pytest.approx(alpha)
     assert metrics["Information Ratio"] == pytest.approx(information_ratio)
-    assert metrics["Benchmark Observations"] == 4
+    assert metrics["Benchmark Observations"] == 3
 
 
 def test_calculate_benchmark_relative_metrics_drops_mismatched_return_periods() -> None:
@@ -87,7 +90,7 @@ def test_calculate_benchmark_relative_metrics_drops_mismatched_return_periods() 
 
     assert math.isnan(metrics["Strategy Aligned Total Return"])
     assert math.isnan(metrics["Benchmark Total Return"])
-    assert metrics["Benchmark Observations"] == 1
+    assert metrics["Benchmark Observations"] == 0
 
 
 def test_calculate_benchmark_relative_metrics_handles_constant_benchmark() -> None:
@@ -103,7 +106,7 @@ def test_calculate_benchmark_relative_metrics_handles_constant_benchmark() -> No
     assert math.isnan(metrics["Beta"])
     assert math.isnan(metrics["Alpha"])
     assert math.isfinite(metrics["Information Ratio"])
-    assert metrics["Benchmark Observations"] == 3
+    assert metrics["Benchmark Observations"] == 2
 
 
 def test_calculate_benchmark_relative_metrics_requires_columns() -> None:
@@ -250,3 +253,57 @@ def test_calculate_benchmark_relative_metrics_drops_day_zero_if_prior_missing() 
         expected_strategy_total
     )
     assert metrics["Benchmark Total Return"] == pytest.approx(expected_benchmark_total)
+
+
+def test_calculate_benchmark_relative_metrics_excludes_cold_start_vs_prior_date() -> (
+    None
+):
+    """Verify cold-start row 0 is excluded unless prior_date is provided."""
+    prior_date = datetime.date(2020, 1, 1)
+    dates = [
+        datetime.date(2020, 1, 2),
+        datetime.date(2020, 1, 3),
+        datetime.date(2020, 1, 4),
+        datetime.date(2020, 1, 5),
+    ]
+    # Row 0 has a distinct return (-0.05) to make inclusion vs exclusion clear.
+    strategy_returns = np.array([-0.05, 0.02, -0.01, 0.03])
+    strategy_results = pl.DataFrame(
+        {"Date": dates, "strategy_returns": strategy_returns}
+    )
+    cold_benchmark = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close": [100.0, 101.0, 100.495, 103.50985],
+        }
+    )
+    validation_benchmark = pl.DataFrame(
+        {
+            "Date": [prior_date, *dates],
+            "Close": [100.0, 98.0, 98.98, 98.4851, 101.439653],
+        }
+    )
+
+    cold_metrics = calculate_benchmark_relative_metrics(
+        strategy_results, cold_benchmark
+    )
+    validation_metrics = calculate_benchmark_relative_metrics(
+        strategy_results, validation_benchmark, prior_date=prior_date
+    )
+
+    expected_cold_strategy = float(np.prod(1 + strategy_returns[1:]) - 1)
+    expected_validation_strategy = float(np.prod(1 + strategy_returns) - 1)
+
+    assert cold_metrics["Benchmark Observations"] == 3
+    assert cold_metrics["Strategy Aligned Total Return"] == pytest.approx(
+        expected_cold_strategy
+    )
+    assert validation_metrics["Benchmark Observations"] == 4
+    assert validation_metrics["Strategy Aligned Total Return"] == pytest.approx(
+        expected_validation_strategy
+    )
+    assert cold_metrics["Beta"] != pytest.approx(validation_metrics["Beta"])
+    assert cold_metrics["Alpha"] != pytest.approx(validation_metrics["Alpha"])
+    assert cold_metrics["Information Ratio"] != pytest.approx(
+        validation_metrics["Information Ratio"]
+    )

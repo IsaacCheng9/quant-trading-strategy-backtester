@@ -542,8 +542,13 @@ class Backtester:
 
         # Measure the risk-adjusted return.
         rf_daily = (1 + risk_free_return_rate_annual) ** (1 / TRADING_DAYS_PER_YEAR) - 1
+        strategy_returns_for_risk = (
+            self.results["strategy_returns"]
+            if include_initial_period
+            else self.results["strategy_returns"].slice(1)
+        )
         excess_returns = _finite_values(
-            self.results["strategy_returns"].cast(pl.Float64) - rf_daily
+            strategy_returns_for_risk.cast(pl.Float64) - rf_daily
         )
         sharpe_ratio = _calculate_sharpe_ratio(excess_returns)
         sortino_ratio = _calculate_sortino_ratio(excess_returns)
