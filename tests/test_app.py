@@ -6,7 +6,7 @@ from typing import Any
 import polars as pl
 import pytest
 
-from quant_trading_strategy_backtester import app, visualisation
+from quant_trading_strategy_backtester import app, optimiser, visualisation
 from quant_trading_strategy_backtester.app import (
     _build_save_key,
     _display_benchmark_comparison,
@@ -546,8 +546,10 @@ def test_main_displays_and_saves_stitched_walk_forward_results(monkeypatch) -> N
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app._display_benchmark_comparison",
-        lambda results, backtest_data: captured.update(
-            benchmark_rows=len(results), benchmark_data_rows=len(backtest_data)
+        lambda results, backtest_data, full_data=None: captured.update(
+            benchmark_rows=len(results),
+            benchmark_data_rows=len(backtest_data),
+            benchmark_full_data_rows=len(full_data) if full_data is not None else 0,
         ),
     )
     monkeypatch.setattr(
@@ -570,7 +572,7 @@ def test_main_displays_and_saves_stitched_walk_forward_results(monkeypatch) -> N
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app.display_historical_results",
-        lambda: None,
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app.Backtester.save_results",
@@ -587,6 +589,116 @@ def test_main_displays_and_saves_stitched_walk_forward_results(monkeypatch) -> N
     assert captured["equity_results"].equals(expected_results)
     assert captured["benchmark_rows"] == len(expected_results)
     assert captured["benchmark_data_rows"] == len(expected_results)
+    assert captured["benchmark_full_data_rows"] == len(data)
     assert captured["saved_data_rows"] == len(expected_results)
     assert captured["saved_results_rows"] == len(expected_results)
     assert captured["saved_params"] == expected_params
+
+
+def test_stitched_pairs_walk_forward_plots_varying_threshold_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify varying walk-forward pair thresholds render step traces."""
+    fold_1_results = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)],
+            "z_score": [-2.2, -0.3],
+            "signal": [1.0, 0.0],
+            "position_change": [1.0, -1.0],
+            "gross_strategy_returns": [0.0, 0.02],
+            "strategy_returns": [0.0, 0.019],
+            "transaction_costs": [0.001, 0.001],
+            "trade_turnover": [1.0, 1.0],
+            "gross_cumulative_returns": [1.0, 1.02],
+            "cumulative_returns": [1.0, 1.019],
+            "cumulative_transaction_costs": [0.001, 0.002],
+            "equity_curve": [100_000.0, 101_900.0],
+        }
+    )
+    fold_2_results = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, 3), datetime.date(2020, 1, 4)],
+            "z_score": [1.6, 0.2],
+            "signal": [-1.0, 0.0],
+            "position_change": [-1.0, 1.0],
+            "gross_strategy_returns": [0.0, 0.01],
+            "strategy_returns": [0.0, 0.009],
+            "transaction_costs": [0.001, 0.001],
+            "trade_turnover": [1.0, 1.0],
+            "gross_cumulative_returns": [1.0, 1.01],
+            "cumulative_returns": [1.0, 1.009],
+            "cumulative_transaction_costs": [0.001, 0.002],
+            "equity_curve": [100_000.0, 100_900.0],
+        }
+    )
+    stitched, _ = optimiser.stitch_walk_forward_oos_results(
+        [
+            {
+                "fold": 1,
+                "params": {"window": 10, "entry_z_score": 2.0, "exit_z_score": 0.5},
+                "oos_results": fold_1_results,
+            },
+            {
+                "fold": 2,
+                "params": {"window": 20, "entry_z_score": 1.5, "exit_z_score": 0.2},
+                "oos_results": fold_2_results,
+            },
+        ]
+    )
+
+    assert stitched["entry_z_score"].to_list() == [2.0, 2.0, 1.5, 1.5]
+    assert stitched["exit_z_score"].to_list() == [0.5, 0.5, 0.2, 0.2]
+
+    plotted_figs: list[object] = []
+    monkeypatch.setattr(visualisation.st, "subheader", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        visualisation.st,
+        "plotly_chart",
+        lambda fig: plotted_figs.append(fig),
+    )
+
+    visualisation.plot_pairs_spread(
+        stitched,
+        "AAPL vs. MSFT",
+        "Apple vs. Microsoft",
+        entry_z_score=1.5,
+        exit_z_score=0.2,
+    )
+
+    assert len(plotted_figs) == 1
+    fig = plotted_figs[0]
+    step_traces = [
+        trace
+        for trace in fig.data  # type: ignore[attr-defined]
+        if trace.name in {"Entry (+)", "Entry (-)", "Exit (+)", "Exit (-)"}
+    ]
+    assert len(step_traces) == 4
+    assert all(trace.line.shape == "hv" for trace in step_traces)
+    assert list(step_traces[0].y) == [2.0, 2.0, 1.5, 1.5]
+
+
+def test_walk_forward_status_callback_uses_custom_n_folds() -> None:
+    """Verify walk-forward status message interpolates custom n_folds."""
+    messages: list[str] = []
+
+    data = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2020, 1, 1) + datetime.timedelta(days=i)
+                for i in range(60)
+            ],
+            "Close": [100.0 + i * 0.5 for i in range(60)],
+        }
+    )
+    optimiser.walk_forward_optimise(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [3], "long_window": [10]},
+        "AAPL",
+        n_folds=3,
+        status_callback=messages.append,
+    )
+
+    assert len(messages) == 1
+    assert "3 expanding walk-forward folds" in messages[0]
+    assert "stitched out-of-sample" in messages[0]

@@ -854,6 +854,18 @@ def stitch_walk_forward_oos_results(
             raise ValueError(
                 "Each walk-forward fold must include non-empty oos_results"
             )
+        fold_params = fold.get("params")
+        if (
+            isinstance(fold_params, Mapping)
+            and "entry_z_score" in fold_params
+            and "exit_z_score" in fold_params
+        ):
+            oos_results = oos_results.with_columns(
+                [
+                    pl.lit(float(fold_params["entry_z_score"])).alias("entry_z_score"),
+                    pl.lit(float(fold_params["exit_z_score"])).alias("exit_z_score"),
+                ]
+            )
         oos_frames.append(oos_results)
 
     stitched_results = pl.concat(oos_frames, how="vertical")
