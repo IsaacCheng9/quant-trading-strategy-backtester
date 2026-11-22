@@ -174,11 +174,30 @@ def evaluate_validation_period(
         tickers=tickers,
     )
     backtester.results = validation_results
-    metrics = backtester.get_performance_metrics()
+    include_initial_period = _has_prior_context(context_data, validation_data)
+    metrics = backtester.get_performance_metrics(
+        include_initial_period=include_initial_period
+    )
     if metrics is None:
         raise ValueError("Validation period produced no performance metrics")
 
     return validation_results, metrics
+
+
+def _has_prior_context(
+    context_data: pl.DataFrame, validation_data: pl.DataFrame
+) -> bool:
+    """Return whether context_data starts strictly before validation_data."""
+    validation_start = validation_data.select(pl.col("Date").min()).item()
+    if validation_start is None:
+        return False
+
+    return (
+        context_data.filter(
+            pl.col("Date") < pl.lit(validation_start, dtype=context_data["Date"].dtype)
+        ).height
+        > 0
+    )
 
 
 def _reset_cumulative_result_columns(

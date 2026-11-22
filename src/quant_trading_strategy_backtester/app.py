@@ -173,20 +173,63 @@ def _format_p_value(value: float) -> str:
     return f"{value:.4f}"
 
 
-def _get_benchmark_date_range(
-    data: pl.DataFrame,
-) -> tuple[datetime.date, datetime.date]:
-    """
-    Return the inclusive start and exclusive end dates for benchmark loading.
+def _get_prior_date(
+    full_data: pl.DataFrame,
+    backtest_data: pl.DataFrame,
+) -> datetime.date | datetime.datetime | None:
+    """Return the last trading date strictly before the backtest period.
 
     Args:
-        data: Backtest data containing a Date column.
+        full_data: Full historical price data containing a Date column.
+        backtest_data: Displayed backtest slice containing a Date column.
+
+    Returns:
+        The latest Date in full_data strictly before backtest_data's first
+        Date, or None when backtest_data starts at the beginning of full_data.
+    """
+    if (
+        full_data.is_empty()
+        or backtest_data.is_empty()
+        or "Date" not in full_data.columns
+        or "Date" not in backtest_data.columns
+    ):
+        return None
+
+    backtest_start = backtest_data.select(pl.col("Date").min()).item()
+    if backtest_start is None:
+        return None
+
+    prior_dates = full_data.filter(
+        pl.col("Date") < pl.lit(backtest_start, dtype=full_data["Date"].dtype)
+    )
+    if prior_dates.is_empty():
+        return None
+
+    prior_date = prior_dates.select(pl.col("Date").max()).item()
+    return cast(datetime.date | datetime.datetime | None, prior_date)
+
+
+def _get_benchmark_date_range(
+    backtest_data: pl.DataFrame,
+    prior_date: datetime.date | datetime.datetime | None = None,
+) -> tuple[datetime.date, datetime.date]:
+    """Return inclusive start and exclusive end dates for benchmark loading.
+
+    Args:
+        backtest_data: Backtest data containing a Date column.
+        prior_date: Optional trading date immediately preceding backtest_data
+            to include when computing day-0 benchmark returns.
 
     Returns:
         A start date and Yahoo-compatible exclusive end date.
     """
-    start_date = _to_date(data["Date"].min())
-    end_date = _to_date(data["Date"].max()) + datetime.timedelta(days=1)
+    backtest_start = _to_date(backtest_data["Date"].min())
+    start_date = (
+        min(_to_date(prior_date), backtest_start)
+        if prior_date is not None
+        else backtest_start
+    )
+    end_date = _to_date(backtest_data["Date"].max()) + datetime.timedelta(days=1)
     return start_date, end_date
 
 
@@ -205,18 +248,24 @@ def _to_date(value: Any) -> datetime.date:
 
 
 def _display_benchmark_comparison(
-    results: pl.DataFrame, backtest_data: pl.DataFrame
+    results: pl.DataFrame,
+    backtest_data: pl.DataFrame,
+    full_data: pl.DataFrame | None = None,
 ) -> None:
-    """
-    Display strategy metrics relative to the default benchmark.
+    """Display strategy metrics relative to the default benchmark.
 
     Args:
         results: Backtest results for the displayed period.
         backtest_data: Price data for the displayed period.
+        full_data: Optional full historical price data used to locate the
+            trading date immediately before a validation slice.
     """
+    prior_date = (
+        _get_prior_date(full_data, backtest_data) if full_data is not None else None
+    )
     try:
         benchmark_start_date, benchmark_end_date = _get_benchmark_date_range(
-            backtest_data
+            backtest_data, prior_date=prior_date
         )
         benchmark_data = load_yfinance_data_one_ticker(
             BENCHMARK_TICKER, benchmark_start_date, benchmark_end_date
@@ -225,7 +274,9 @@ def _display_benchmark_comparison(
         st.warning(f"Benchmark comparison unavailable: {exc}")
         return
 
-    benchmark_metrics = calculate_benchmark_relative_metrics(results, benchmark_data)
+    benchmark_metrics = calculate_benchmark_relative_metrics(
+        results, benchmark_data, prior_date=prior_date
+    )
     if benchmark_metrics["Benchmark Observations"] == 0:
         st.warning(
             "Benchmark comparison unavailable: no overlapping benchmark data "
@@ -853,7 +904,7 @@ def main():
         )
 
     display_performance_metrics(metrics, company_display)
-    _display_benchmark_comparison(results, backtest_data)
+    _display_benchmark_comparison(results, backtest_data, full_data=data)
     plot_equity_curve(
         results,
         ticker_display,

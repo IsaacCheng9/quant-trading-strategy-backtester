@@ -2,6 +2,7 @@
 Calculate benchmark-relative performance metrics.
 """
 
+import datetime
 import math
 
 import numpy as np
@@ -16,14 +17,17 @@ def calculate_benchmark_relative_metrics(
     strategy_results: pl.DataFrame,
     benchmark_data: pl.DataFrame,
     risk_free_return_rate_annual: float = 0.0,
+    prior_date: datetime.date | datetime.datetime | None = None,
 ) -> dict[str, float]:
-    """
-    Calculate strategy performance relative to a benchmark return stream.
+    """Calculate strategy performance relative to a benchmark return stream.
 
     Args:
-        strategy_results: Backtest results containing Date and strategy_returns.
+        strategy_results: Backtest results containing Date and
+            strategy_returns.
         benchmark_data: Benchmark price data containing Date and Close.
         risk_free_return_rate_annual: Annualised risk-free return rate.
+        prior_date: Optional trading date immediately preceding row 0 of
+            strategy_results (used to align validation-boundary returns).
 
     Returns:
         Benchmark-relative metrics aligned on common trading dates.
@@ -37,10 +41,21 @@ def calculate_benchmark_relative_metrics(
     if strategy_results.is_empty() or benchmark_data.is_empty():
         return _undefined_metrics(0)
 
+    strategy_previous_date = pl.col("Date").shift(1)
+    if prior_date is not None:
+        prior_date_expr = _normalise_prior_date(
+            prior_date, strategy_results["Date"].dtype
+        )
+        strategy_previous_date = (
+            pl.when(pl.int_range(pl.len()) == 0)
+            .then(prior_date_expr)
+            .otherwise(strategy_previous_date)
+        )
+
     strategy_returns_data = (
         strategy_results.select(["Date", "strategy_returns"])
         .sort("Date")
-        .with_columns(pl.col("Date").shift(1).alias("strategy_previous_date"))
+        .with_columns(strategy_previous_date.alias("strategy_previous_date"))
     )
     benchmark_returns = (
         benchmark_data.select(["Date", "Close"])
@@ -116,6 +131,39 @@ def calculate_benchmark_relative_metrics(
         "Information Ratio": information_ratio,
         "Benchmark Observations": float(len(strategy_returns)),
     }
+
+
+def _normalise_prior_date(
+    prior_date: datetime.date | datetime.datetime,
+    date_dtype: pl.DataType,
+) -> pl.Expr:
+    """Convert a prior date scalar into an expression matching date_dtype."""
+    if date_dtype == pl.Date:
+        normalised_date = (
+            prior_date.date()
+            if isinstance(prior_date, datetime.datetime)
+            else prior_date
+        )
+        return pl.lit(normalised_date, dtype=pl.Date)
+
+    if isinstance(date_dtype, pl.Datetime):
+        time_unit = date_dtype.time_unit or "us"
+        if isinstance(prior_date, datetime.datetime):
+            expr = pl.lit(prior_date)
+            if prior_date.tzinfo is None and date_dtype.time_zone is not None:
+                return expr.cast(pl.Datetime(time_unit)).dt.replace_time_zone(
+                    date_dtype.time_zone
+                )
+            if prior_date.tzinfo is not None and date_dtype.time_zone is None:
+                return expr.dt.replace_time_zone(None).cast(date_dtype)
+            return expr.cast(date_dtype)
+
+        expr = pl.lit(prior_date, dtype=pl.Date).cast(pl.Datetime(time_unit))
+        if date_dtype.time_zone is not None:
+            return expr.dt.replace_time_zone(date_dtype.time_zone)
+        return expr
+
+    return pl.lit(prior_date).cast(date_dtype)
 
 
 def _validate_columns(

@@ -118,3 +118,135 @@ def test_calculate_benchmark_relative_metrics_requires_columns() -> None:
             data.with_columns(pl.lit(0.0).alias("strategy_returns")),
             data,
         )
+
+
+def test_calculate_benchmark_relative_metrics_with_prior_date_captures_day_zero() -> (
+    None
+):
+    """Verify prior_date aligns real day-0 returns on pl.Date columns."""
+    prior_date = datetime.date(2020, 1, 1)
+    validation_dates = [
+        datetime.date(2020, 1, 2),
+        datetime.date(2020, 1, 3),
+        datetime.date(2020, 1, 4),
+    ]
+    strategy_returns = np.array([0.04, -0.01, 0.02])
+    benchmark_closes = [100.0, 105.0, 102.9, 104.958]
+    benchmark_returns = np.array([0.05, -0.02, 0.02])
+
+    strategy_results = pl.DataFrame(
+        {"Date": validation_dates, "strategy_returns": strategy_returns}
+    )
+    benchmark_data = pl.DataFrame(
+        {
+            "Date": [prior_date, *validation_dates],
+            "Close": benchmark_closes,
+        }
+    )
+
+    metrics = calculate_benchmark_relative_metrics(
+        strategy_results,
+        benchmark_data,
+        prior_date=prior_date,
+    )
+
+    expected_strategy_total = float(np.prod(1 + strategy_returns) - 1)
+    expected_benchmark_total = float(np.prod(1 + benchmark_returns) - 1)
+    expected_beta = float(np.cov(strategy_returns, benchmark_returns)[0, 1]) / float(
+        np.var(benchmark_returns, ddof=1)
+    )
+
+    assert metrics["Benchmark Observations"] == 3
+    assert metrics["Strategy Aligned Total Return"] == pytest.approx(
+        expected_strategy_total
+    )
+    assert metrics["Benchmark Total Return"] == pytest.approx(expected_benchmark_total)
+    assert metrics["Excess Return"] == pytest.approx(
+        expected_strategy_total - expected_benchmark_total
+    )
+    assert metrics["Beta"] == pytest.approx(expected_beta)
+
+
+def test_calculate_benchmark_relative_metrics_with_prior_date_timezone_datetime() -> (
+    None
+):
+    """Verify prior_date works on timezone-aware pl.Datetime Date columns."""
+    prior_dt = datetime.datetime(2020, 1, 1, 0, 0, tzinfo=datetime.UTC)
+    validation_dts = [
+        datetime.datetime(2020, 1, 2, 0, 0, tzinfo=datetime.UTC),
+        datetime.datetime(2020, 1, 3, 0, 0, tzinfo=datetime.UTC),
+        datetime.datetime(2020, 1, 4, 0, 0, tzinfo=datetime.UTC),
+    ]
+    strategy_results = pl.DataFrame(
+        {
+            "Date": validation_dts,
+            "strategy_returns": [0.02, -0.01, 0.03],
+        }
+    )
+    benchmark_data = pl.DataFrame(
+        {
+            "Date": [prior_dt, *validation_dts],
+            "Close": [100.0, 102.0, 100.98, 104.0094],
+        }
+    )
+
+    # Pass both datetime and plain date forms of prior_date.
+    metrics_from_dt = calculate_benchmark_relative_metrics(
+        strategy_results,
+        benchmark_data,
+        prior_date=prior_dt,
+    )
+    metrics_from_date = calculate_benchmark_relative_metrics(
+        strategy_results,
+        benchmark_data,
+        prior_date=prior_dt.date(),
+    )
+
+    expected_benchmark_total = 104.0094 / 100.0 - 1
+    assert metrics_from_dt["Benchmark Observations"] == 3
+    assert metrics_from_dt["Benchmark Total Return"] == pytest.approx(
+        expected_benchmark_total
+    )
+    assert metrics_from_dt["Beta"] == pytest.approx(1.0)
+    assert metrics_from_date["Benchmark Observations"] == 3
+    assert metrics_from_date["Benchmark Total Return"] == pytest.approx(
+        expected_benchmark_total
+    )
+
+
+def test_calculate_benchmark_relative_metrics_drops_day_zero_if_prior_missing() -> None:
+    """Verify row 0 is dropped when benchmark lacks prior_date."""
+    prior_date = datetime.date(2020, 1, 1)
+    validation_dates = [
+        datetime.date(2020, 1, 2),
+        datetime.date(2020, 1, 3),
+        datetime.date(2020, 1, 4),
+    ]
+    strategy_results = pl.DataFrame(
+        {
+            "Date": validation_dates,
+            "strategy_returns": [0.05, 0.02, -0.01],
+        }
+    )
+    # Benchmark starts on validation day 0 without prior_date.
+    benchmark_data = pl.DataFrame(
+        {
+            "Date": validation_dates,
+            "Close": [100.0, 101.0, 100.0],
+        }
+    )
+
+    metrics = calculate_benchmark_relative_metrics(
+        strategy_results,
+        benchmark_data,
+        prior_date=prior_date,
+    )
+
+    # Only days 1 and 2 have matching prior dates; day 0 is dropped.
+    expected_strategy_total = (1.02 * 0.99) - 1
+    expected_benchmark_total = (100.0 / 100.0) - 1
+    assert metrics["Benchmark Observations"] == 2
+    assert metrics["Strategy Aligned Total Return"] == pytest.approx(
+        expected_strategy_total
+    )
+    assert metrics["Benchmark Total Return"] == pytest.approx(expected_benchmark_total)

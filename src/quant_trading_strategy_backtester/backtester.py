@@ -498,21 +498,25 @@ class Backtester:
         return result
 
     def get_performance_metrics(
-        self, risk_free_return_rate_annual: float = 0.0
+        self,
+        risk_free_return_rate_annual: float = 0.0,
+        include_initial_period: bool = False,
     ) -> dict[str, float] | None:
-        """
-        Calculates key performance metrics from the trading strategy backtest.
+        """Calculate performance metrics from the trading strategy backtest.
 
         Computes the total return, Sharpe ratio, and maximum drawdown based on
         the backtest results.
 
         Args:
-            - risk_free_return_rate_annual: The risk-free rate of return
-                annualised. Defaults to 0.0% per annum for simplicity.
+            risk_free_return_rate_annual: Annualised risk-free return rate.
+                Defaults to 0.0% per annum for simplicity.
+            include_initial_period: Whether row 0 represents a full return
+                period (e.g. a validation slice with prior context) rather than
+                a cold-start row.
 
         Returns:
             A dictionary containing performance metrics, or None if the
-            backtest hasn't been run yet.
+            backtest has not been run yet.
         """
         if self.results is None or self.results.is_empty():
             return None
@@ -547,8 +551,13 @@ class Backtester:
         max_drawdown_duration = _calculate_max_drawdown_duration(
             drawdowns.cast(pl.Float64)
         )
+        calmar_periods = (
+            len(self.results)
+            if include_initial_period
+            else max(len(self.results) - 1, 1)
+        )
         calmar_ratio = _calculate_calmar_ratio(
-            total_return, max_drawdown, max(len(self.results) - 1, 1)
+            total_return, max_drawdown, calmar_periods
         )
 
         # TODO: Split the calculations out into separate functions.

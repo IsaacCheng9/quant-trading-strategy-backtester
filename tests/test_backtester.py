@@ -555,6 +555,63 @@ def test_backtester_reports_downside_and_drawdown_risk_metrics() -> None:
     assert metrics["Max Drawdown Duration"] == 2
 
 
+def test_get_performance_metrics_include_initial_period_calmar() -> None:
+    """Verify include_initial_period uses all result rows for Calmar."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(4)]
+    strategy_returns = [0.05, -0.1, 0.2, 0.1]
+    cumulative_returns = []
+    running = 1.0
+    for ret in strategy_returns:
+        running *= 1 + ret
+        cumulative_returns.append(running)
+    equity_curve = [100_000.0 * value for value in cumulative_returns]
+
+    results = pl.DataFrame(
+        {
+            "Date": dates,
+            "signal": [1.0] * 4,
+            "position_change": [0.0] * 4,
+            "gross_strategy_returns": strategy_returns,
+            "strategy_returns": strategy_returns,
+            "transaction_costs": [0.0] * 4,
+            "trade_turnover": [0.0] * 4,
+            "gross_cumulative_returns": cumulative_returns,
+            "cumulative_returns": cumulative_returns,
+            "cumulative_transaction_costs": [0.0] * 4,
+            "equity_curve": equity_curve,
+        }
+    )
+    backtester = Backtester(
+        pl.DataFrame({"Date": dates, "Close": [100.0] * 4}),
+        BuyAndHoldStrategy({}),
+    )
+    backtester.results = results
+
+    cold_start_metrics = backtester.get_performance_metrics(
+        include_initial_period=False
+    )
+    validation_metrics = backtester.get_performance_metrics(include_initial_period=True)
+    assert cold_start_metrics is not None
+    assert validation_metrics is not None
+
+    total_return = cumulative_returns[-1] - 1
+    max_drawdown = abs(cold_start_metrics["Max Drawdown"])
+    expected_cold_calmar = (
+        (1 + total_return) ** (TRADING_DAYS_PER_YEAR / 3) - 1
+    ) / max_drawdown
+    expected_validation_calmar = (
+        (1 + total_return) ** (TRADING_DAYS_PER_YEAR / 4) - 1
+    ) / max_drawdown
+
+    assert cold_start_metrics["Calmar Ratio"] == pytest.approx(expected_cold_calmar)
+    assert validation_metrics["Calmar Ratio"] == pytest.approx(
+        expected_validation_calmar
+    )
+    assert validation_metrics["Calmar Ratio"] != pytest.approx(
+        cold_start_metrics["Calmar Ratio"]
+    )
+
+
 def test_drawdown_includes_initial_capital_baseline() -> None:
     """Verify that entry costs create drawdown from initial capital."""
     dates = [datetime.date(2020, 1, day) for day in range(1, 4)]
