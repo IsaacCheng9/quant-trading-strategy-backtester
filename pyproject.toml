@@ -1,7 +1,7 @@
 [project]
 name = "quant-trading-strategy-backtester"
 description = "A Polars-backed Python quantitative trading strategy backtesting library with an optional Streamlit dashboard."
-version = "0.9.4"
+version = "0.9.5"
 readme = "README.md"
 authors = [
     { name = "Isaac Cheng", email = "47993930+IsaacCheng9@users.noreply.github.com" },
@@ -63,7 +63,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "BLE", "DTZ", "TRY004", "RUF100"]
 
 [tool.commitizen]
 name = "cz_customize"
-version = "0.9.4"
+version = "0.9.5"
 version_files = [
     "pyproject.toml:version",
     "pyproject.toml:tool.commitizen.version",

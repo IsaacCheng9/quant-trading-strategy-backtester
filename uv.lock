@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = "==3.13.*"
 
 [manifest]
@@ -724,7 +724,7 @@ wheels = [
 
 [[package]]
 name = "quant-trading-strategy-backtester"
-version = "0.9.4"
+version = "0.9.5"
 source = { editable = "." }
 dependencies = [
     { name = "lxml" },
