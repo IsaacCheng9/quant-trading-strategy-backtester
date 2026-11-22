@@ -325,7 +325,7 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
     def mock_load_data(*args, **kwargs):
         return mock_polars_data
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         pair = tuple(tickers)
         return None, {
             "Sharpe Ratio": train_scores[pair],
@@ -339,6 +339,7 @@ def test_optimise_pairs_trading_tickers_ranks_fixed_pairs_on_train(monkeypatch):
         strategy_type,
         params,
         tickers,
+        **_kwargs,
     ):
         assert len(context_data) == 10
         assert len(validation_data) == 3
@@ -414,6 +415,7 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
         parameter_ranges,
         tickers,
         test_data=None,
+        **_kwargs,
     ):
         assert test_data is None
         assert len(data) == 7
@@ -434,6 +436,7 @@ def test_optimise_pairs_trading_tickers_ranks_optimised_pairs_on_train(
         strategy_type,
         params,
         tickers,
+        **_kwargs,
     ):
         assert len(context_data) == 10
         assert len(validation_data) == 3
@@ -508,7 +511,7 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
         pair = tuple(data["Pair"][0].split("/"))
         return _cointegration_result(pair != ("AAPL", "GOOGL"))
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         pair = tuple(tickers)
         return None, {
             "Sharpe Ratio": train_scores[pair],
@@ -522,6 +525,7 @@ def test_optimise_pairs_trading_tickers_filters_non_cointegrated_pairs(
         strategy_type,
         params,
         tickers,
+        **_kwargs,
     ):
         pair = tuple(tickers)
         return pl.DataFrame(), {
@@ -1396,7 +1400,7 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
 
     call_log: list[tuple[str, int] | tuple[str, int, int]] = []
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         call_log.append(("backtest", len(data)))
         return None, {
             "Sharpe Ratio": 1.0,
@@ -1410,6 +1414,7 @@ def test_optimise_strategy_params_returns_test_metrics(monkeypatch):
         strategy_type,
         params,
         tickers,
+        **_kwargs,
     ):
         call_log.append(("validation", len(context_data), len(validation_data)))
         return pl.DataFrame(), {
@@ -1452,7 +1457,7 @@ def test_optimise_strategy_params_skips_nan_sharpe(monkeypatch):
         }
     )
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         sharpe = math.nan if params["short_window"] == 5 else 1.0
         return None, {
             "Sharpe Ratio": sharpe,
@@ -1484,7 +1489,7 @@ def test_optimise_strategy_params_raises_when_all_sharpes_are_nan(monkeypatch):
         }
     )
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         return None, {
             "Sharpe Ratio": math.nan,
             "Total Return": 0.0,
@@ -1517,7 +1522,7 @@ def test_optimise_strategy_params_skips_invalid_parameter_combinations(
     )
     evaluated_params = []
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         evaluated_params.append(params)
         return None, {
             "Sharpe Ratio": 1.0,
@@ -1599,7 +1604,7 @@ def test_optimise_buy_and_hold_ticker_uses_train_test_split(monkeypatch):
                 "Max Drawdown": -0.1,
             }
 
-    def mock_backtest_init(data, strategy, tickers):
+    def mock_backtest_init(data, strategy, tickers=None, **_kwargs):
         returns = {"AAPL": 0.3, "GOOGL": 0.2}
         assert tickers in returns
         return MockBacktester(data, strategy, tickers)
@@ -1700,7 +1705,7 @@ def test_optimise_strategy_params_invokes_callbacks(monkeypatch) -> None:
         }
     )
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         return None, {
             "Sharpe Ratio": float(params["short_window"]),
             "Total Return": 0.1,
@@ -1908,3 +1913,290 @@ def test_run_optimisation_walk_forward_invokes_callbacks() -> None:
     )
     assert len(received_folds) == 1
     assert len(received_folds[0]) == 5
+
+
+def test_optimise_single_ticker_picks_first_valid_parameter_combination(
+    monkeypatch,
+) -> None:
+    """Verify ticker selection skips invalid leading parameter combinations."""
+    top_companies = [("AAPL", 2.0), ("MSFT", 1.0)]
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(40)]
+    mock_data = pl.DataFrame(
+        {"Date": dates, "Close": [100.0 + i * 0.5 for i in range(40)]}
+    )
+    used_params: list[dict[str, Any]] = []
+
+    def tracking_run_backtest(
+        data,
+        strategy_type,
+        params,
+        tickers,
+        initial_capital=100_000.0,
+        transaction_cost_bps=5.0,
+        slippage_bps=3.0,
+    ):
+        used_params.append(
+            {
+                "params": params,
+                "initial_capital": initial_capital,
+                "transaction_cost_bps": transaction_cost_bps,
+                "slippage_bps": slippage_bps,
+            }
+        )
+        return None, {"Sharpe Ratio": 1.0 if tickers == "AAPL" else 2.0}
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: mock_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        tracking_run_backtest,
+    )
+
+    best_ticker = optimise_single_ticker_strategy_ticker(
+        top_companies,
+        dates[0],
+        dates[-1],
+        "Moving Average Crossover",
+        {"short_window": [25, 10], "long_window": [20, 50]},
+        initial_capital=250_000.0,
+        transaction_cost_bps=12.0,
+        slippage_bps=6.0,
+    )
+
+    assert best_ticker == "MSFT"
+    # (25, 20) is invalid because short_window >= long_window; (25, 50) is first valid.
+    assert used_params == [
+        {
+            "params": {"short_window": 25, "long_window": 50},
+            "initial_capital": 250_000.0,
+            "transaction_cost_bps": 12.0,
+            "slippage_bps": 6.0,
+        },
+        {
+            "params": {"short_window": 25, "long_window": 50},
+            "initial_capital": 250_000.0,
+            "transaction_cost_bps": 12.0,
+            "slippage_bps": 6.0,
+        },
+    ]
+
+
+def test_optimise_single_ticker_raises_when_no_valid_parameter_combination() -> None:
+    """Verify ticker selection fails clearly when no parameter combo is valid."""
+    with pytest.raises(ValueError, match="No valid parameter combinations"):
+        optimise_single_ticker_strategy_ticker(
+            [("AAPL", 2.0)],
+            datetime.date(2020, 1, 1),
+            datetime.date(2020, 3, 1),
+            "Moving Average Crossover",
+            {"short_window": [30, 40], "long_window": [20]},
+        )
+
+
+def test_trading_assumptions_propagate_through_backtest_validation_and_walk_forward() -> (
+    None
+):
+    """Verify custom capital and cost assumptions flow through optimiser."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(72)]
+    closes = [100.0 + (i % 10) * 1.5 + i * 0.2 for i in range(72)]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+
+    low_cost_results, low_cost_metrics = run_backtest(
+        data,
+        "Moving Average Crossover",
+        {"short_window": 3, "long_window": 8},
+        "AAPL",
+        initial_capital=50_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+    high_cost_results, high_cost_metrics = run_backtest(
+        data,
+        "Moving Average Crossover",
+        {"short_window": 3, "long_window": 8},
+        "AAPL",
+        initial_capital=250_000.0,
+        transaction_cost_bps=50.0,
+        slippage_bps=25.0,
+    )
+
+    assert low_cost_results["equity_curve"][0] == pytest.approx(50_000.0)
+    assert high_cost_results["equity_curve"][0] == pytest.approx(250_000.0)
+    assert high_cost_metrics["Total Costs"] > low_cost_metrics["Total Costs"]
+    assert high_cost_metrics["Total Return"] < low_cost_metrics["Total Return"]
+
+    val_results, val_metrics = evaluate_validation_period(
+        data,
+        data[50:],
+        "Moving Average Crossover",
+        {"short_window": 3, "long_window": 8},
+        "AAPL",
+        initial_capital=200_000.0,
+        transaction_cost_bps=50.0,
+        slippage_bps=25.0,
+    )
+    val_zero_results, val_zero_metrics = evaluate_validation_period(
+        data,
+        data[50:],
+        "Moving Average Crossover",
+        {"short_window": 3, "long_window": 8},
+        "AAPL",
+        initial_capital=200_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+    assert val_zero_results["equity_curve"][0] == pytest.approx(
+        200_000.0 * (1 + val_zero_results["strategy_returns"][0])
+    )
+    assert val_metrics["Total Costs"] > val_zero_metrics["Total Costs"]
+    assert val_results["equity_curve"][-1] < val_zero_results["equity_curve"][-1]
+
+    _, wf_high_metrics, wf_high_folds = walk_forward_optimise(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [3], "long_window": [8]},
+        "AAPL",
+        n_folds=3,
+        initial_capital=300_000.0,
+        transaction_cost_bps=50.0,
+        slippage_bps=25.0,
+    )
+    _, wf_zero_metrics, wf_zero_folds = walk_forward_optimise(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [3], "long_window": [8]},
+        "AAPL",
+        n_folds=3,
+        initial_capital=300_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+    wf_stitched, _ = stitch_walk_forward_oos_results(
+        wf_high_folds,
+        initial_capital=300_000.0,
+        transaction_cost_bps=50.0,
+        slippage_bps=25.0,
+    )
+    assert wf_stitched["equity_curve"][0] == pytest.approx(
+        300_000.0 * (1 + wf_stitched["strategy_returns"][0])
+    )
+    assert wf_high_metrics["Total Costs"] > wf_zero_metrics["Total Costs"]
+    assert len(wf_high_folds) == len(wf_zero_folds) == 3
+
+
+def test_optimise_buy_and_hold_and_pairs_forward_trading_assumptions(
+    monkeypatch,
+) -> None:
+    """Verify buy-and-hold and pairs ticker selection forward assumptions."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(30)]
+    single_data = pl.DataFrame(
+        {"Date": dates, "Close": [100.0 + i * 0.5 for i in range(30)]}
+    )
+    pair_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close_1": [100.0 + i * 0.5 for i in range(30)],
+            "Close_2": [200.0 + i * 1.0 for i in range(30)],
+        }
+    )
+
+    _, _, bh_zero = optimise_buy_and_hold_ticker(
+        [("AAPL", 1.0)],
+        dates[0],
+        dates[-1],
+        load_one_ticker=lambda *_a: single_data,
+        initial_capital=150_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+    _, _, bh_high = optimise_buy_and_hold_ticker(
+        [("AAPL", 1.0)],
+        dates[0],
+        dates[-1],
+        load_one_ticker=lambda *_a: single_data,
+        initial_capital=150_000.0,
+        transaction_cost_bps=40.0,
+        slippage_bps=20.0,
+    )
+    assert bh_high["Total Costs"] > bh_zero["Total Costs"]
+    assert bh_high["Total Return"] < bh_zero["Total Return"]
+
+    captured_pair_kwargs: list[dict[str, float]] = []
+
+    def tracking_run_backtest(
+        data,
+        strategy_type,
+        params,
+        tickers,
+        initial_capital=100_000.0,
+        transaction_cost_bps=5.0,
+        slippage_bps=3.0,
+    ):
+        captured_pair_kwargs.append(
+            {
+                "initial_capital": initial_capital,
+                "transaction_cost_bps": transaction_cost_bps,
+                "slippage_bps": slippage_bps,
+            }
+        )
+        return None, {"Sharpe Ratio": 1.5}
+
+    def tracking_eval(
+        context_data,
+        validation_data,
+        strategy_type,
+        params,
+        tickers,
+        initial_capital=100_000.0,
+        transaction_cost_bps=5.0,
+        slippage_bps=3.0,
+    ):
+        captured_pair_kwargs.append(
+            {
+                "initial_capital": initial_capital,
+                "transaction_cost_bps": transaction_cost_bps,
+                "slippage_bps": slippage_bps,
+            }
+        )
+        return pl.DataFrame(), {"Sharpe Ratio": 1.2}
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_cointegration",
+        lambda *_a, **_k: _cointegration_result(True),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        tracking_run_backtest,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        tracking_eval,
+    )
+
+    optimise_pairs_trading_tickers(
+        [("AAPL", 2.0), ("MSFT", 1.0)],
+        dates[0],
+        dates[-1],
+        {"window": 10, "entry_z_score": 2.0, "exit_z_score": 0.5},
+        optimise=False,
+        load_two_tickers=lambda *_a: pair_data,
+        same_company_check=lambda *_a: False,
+        initial_capital=175_000.0,
+        transaction_cost_bps=15.0,
+        slippage_bps=7.5,
+    )
+
+    assert captured_pair_kwargs == [
+        {
+            "initial_capital": 175_000.0,
+            "transaction_cost_bps": 15.0,
+            "slippage_bps": 7.5,
+        },
+        {
+            "initial_capital": 175_000.0,
+            "transaction_cost_bps": 15.0,
+            "slippage_bps": 7.5,
+        },
+    ]

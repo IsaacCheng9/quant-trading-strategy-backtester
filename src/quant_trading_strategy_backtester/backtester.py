@@ -19,6 +19,11 @@ from quant_trading_strategy_backtester.storage import (
     StrategyStore,
 )
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
+from quant_trading_strategy_backtester.utils import (
+    DEFAULT_INITIAL_CAPITAL,
+    DEFAULT_SLIPPAGE_BPS,
+    DEFAULT_TRANSACTION_COST_BPS,
+)
 
 TRADING_DAYS_PER_YEAR = 252
 
@@ -287,9 +292,9 @@ class Backtester:
         self,
         data: pl.DataFrame,
         strategy: BaseStrategy,
-        initial_capital: float = 100000.0,
-        transaction_cost_bps: float = 5.0,
-        slippage_bps: float = 3.0,
+        initial_capital: float = DEFAULT_INITIAL_CAPITAL,
+        transaction_cost_bps: float = DEFAULT_TRANSACTION_COST_BPS,
+        slippage_bps: float = DEFAULT_SLIPPAGE_BPS,
         tickers: str | list[str] | None = None,
     ) -> None:
         self.data = data

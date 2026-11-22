@@ -11,6 +11,9 @@ from quant_trading_strategy_backtester.models import (
 logger = logging.getLogger(__name__)
 NUM_TOP_COMPANIES_ONE_TICKER = 100
 NUM_TOP_COMPANIES_TWO_TICKERS = 20
+DEFAULT_INITIAL_CAPITAL = 100_000.0
+DEFAULT_TRANSACTION_COST_BPS = 5.0
+DEFAULT_SLIPPAGE_BPS = 3.0
 
 
 def clear_database(database_url: str = DEFAULT_DATABASE_URL) -> None:
