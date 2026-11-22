@@ -55,6 +55,13 @@ project-includes = ["src", "tests", "scripts"]
 search-path = ["src", "tests"]
 python-version = "3.13"
 
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "BLE", "DTZ", "TRY004", "RUF100"]
+
 [tool.commitizen]
 name = "cz_customize"
 version = "0.8.16"

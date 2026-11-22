@@ -160,12 +160,13 @@ def mock_yfinance_functions(monkeypatch):
 @pytest.fixture(autouse=True)
 def mock_yfinance_download(monkeypatch):
     def mock_download(*args, **kwargs):
+        dates = pd.date_range(start="2020-01-01", end="2020-12-31")
         return pd.DataFrame(
             {
-                "Date": pd.date_range(start="2020-01-01", end="2020-12-31"),
-                "Close": [100 + i * 0.1 for i in range(365)],
-                "Adj Close": [100 + i * 0.1 for i in range(365)],
-                "Volume": [1000000 for _ in range(365)],
+                "Date": dates,
+                "Close": [100 + i * 0.1 for i in range(len(dates))],
+                "Adj Close": [100 + i * 0.1 for i in range(len(dates))],
+                "Volume": [1000000 for _ in range(len(dates))],
             }
         ).set_index("Date")
 

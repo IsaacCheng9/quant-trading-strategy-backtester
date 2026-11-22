@@ -1034,7 +1034,8 @@ def _valid_parameter_combinations(
         current_params
         for params in itertools.product(*param_values)
         if is_valid_strategy_params(
-            strategy_type, current_params := dict(zip(param_names, params))
+            strategy_type,
+            current_params := dict(zip(param_names, params, strict=True)),
         )
     ]
 

@@ -74,10 +74,7 @@ def _normalise_parameters(parameters: Any) -> dict[str, Any]:
             parsed = json.loads(value)
         except json.JSONDecodeError:
             parsed = {}
-        if isinstance(parsed, dict):
-            value = parsed
-        else:
-            value = {}
+        value = parsed if isinstance(parsed, dict) else {}
 
     if not isinstance(value, dict):
         return {}
