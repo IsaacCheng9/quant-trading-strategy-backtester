@@ -725,7 +725,7 @@ wheels = [
 
 [[package]]
 name = "quant-trading-strategy-backtester"
-version = "0.8.17"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "lxml" },
