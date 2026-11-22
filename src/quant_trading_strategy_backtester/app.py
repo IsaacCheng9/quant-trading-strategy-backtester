@@ -14,7 +14,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -31,6 +31,7 @@ from quant_trading_strategy_backtester.cointegration import evaluate_cointegrati
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
     get_top_sp500_companies,
+    is_same_company,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
@@ -104,8 +105,14 @@ def _cached_get_full_company_name(ticker: str) -> str | None:
     return get_full_company_name(ticker)
 
 
+@st.cache_data
+def _cached_is_same_company(ticker1: str, ticker2: str) -> bool:
+    """Cache Yahoo Finance same-company checks across Streamlit reruns."""
+    return is_same_company(ticker1, ticker2)
+
+
 @contextmanager
-def _streamlit_progress() -> Iterator[ProgressCallback]:
+def _streamlit_progress() -> Generator[ProgressCallback]:
     """Yield a progress callback backed by Streamlit progress widgets."""
     progress_bar = st.progress(0)
     status_text = st.empty()
@@ -152,6 +159,8 @@ def _run_optimisation_with_ui(
             progress_callback=progress_callback,
             status_callback=_display_status_message,
             fold_results_callback=display_walk_forward_results,
+            load_one_ticker=_cached_load_yfinance_data_one_ticker,
+            get_top_companies=_cached_get_top_sp500_companies,
         )
 
     duration = time.time() - start_time
@@ -442,6 +451,7 @@ def prepare_buy_and_hold_strategy_with_optimisation(
             end_date,
             progress_callback=progress_callback,
             status_callback=_display_status_message,
+            load_one_ticker=_cached_load_yfinance_data_one_ticker,
         )
 
     # Calculate and display the time taken for optimisation.
@@ -509,6 +519,7 @@ def prepare_single_ticker_strategy_with_optimisation(
             strategy_params,
             progress_callback=progress_callback,
             status_callback=_display_status_message,
+            load_one_ticker=_cached_load_yfinance_data_one_ticker,
         )
 
     # Load historical data for the selected ticker.
@@ -610,6 +621,8 @@ def prepare_pairs_trading_strategy_with_optimisation(
             optimise,
             progress_callback=progress_callback,
             status_callback=_display_status_message,
+            load_two_tickers=_cached_load_yfinance_data_two_tickers,
+            same_company_check=_cached_is_same_company,
         )
     ticker1, ticker2 = ticker
 
@@ -762,6 +775,7 @@ def prepare_single_ticker_strategy(
                 end_date,
                 progress_callback=progress_callback,
                 status_callback=_display_status_message,
+                load_one_ticker=_cached_load_yfinance_data_one_ticker,
             )
         ticker = best_ticker
         ticker_display = best_ticker

@@ -1491,7 +1491,7 @@ def test_importing_optimiser_does_not_import_streamlit_or_warn() -> None:
 
 
 def test_optimise_strategy_params_invokes_callbacks(monkeypatch) -> None:
-    """Verify parameter optimisation reports progress and status via callbacks."""
+    """Verify parameter optimisation invokes progress and status callbacks."""
     data = pl.DataFrame(
         {
             "Date": [datetime.date(2020, 1, i) for i in range(1, 22)],
@@ -1674,7 +1674,7 @@ def test_optimise_pairs_trading_tickers_invokes_callbacks(monkeypatch) -> None:
 
 
 def test_run_optimisation_walk_forward_invokes_callbacks() -> None:
-    """Verify run_optimisation forwards progress, status, and fold callbacks."""
+    """Verify run_optimisation forwards progress, status, and fold hooks."""
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(60)]
     data = pl.DataFrame({"Date": dates, "Close": [100.0 + i * 0.5 for i in range(60)]})
 

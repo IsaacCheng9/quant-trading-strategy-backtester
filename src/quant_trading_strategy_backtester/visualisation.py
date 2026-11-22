@@ -445,9 +445,9 @@ def display_walk_forward_results(fold_results: list[dict[str, Any]]) -> None:
             col1, col2 = st.columns(2)
             col1.metric(
                 "In-Sample Sharpe",
-                f"{fold['in_sample_sharpe']:.4f}",
+                _format_metric(fold["in_sample_sharpe"], ".4f"),
             )
             col2.metric(
                 "Out-of-Sample Sharpe",
-                f"{fold['oos_metrics']['Sharpe Ratio']:.4f}",
+                _format_metric(fold["oos_metrics"]["Sharpe Ratio"], ".4f"),
             )

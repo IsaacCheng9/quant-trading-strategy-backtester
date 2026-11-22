@@ -239,9 +239,12 @@ def count_valid_parameter_combinations(
     return len(_valid_parameter_combinations(strategy_type, parameter_ranges))
 
 
-def count_candidate_pairs(top_companies: list[tuple[str, float]]) -> int:
+def count_candidate_pairs(
+    top_companies: list[tuple[str, float]],
+    same_company_check: Callable[[str, str], bool] | None = None,
+) -> int:
     """Return pair candidates after same-company filtering."""
-    return len(_candidate_pairs(top_companies))
+    return len(_candidate_pairs(top_companies, same_company_check=same_company_check))
 
 
 def run_optimisation(
@@ -255,6 +258,9 @@ def run_optimisation(
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
     fold_results_callback: Callable[[list[dict[str, Any]]], None] | None = None,
+    load_one_ticker: Callable[[str, datetime.date, datetime.date], pl.DataFrame | None]
+    | None = None,
+    get_top_companies: Callable[[int], list[tuple[str, float]]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, float]]:
     """Run optimisation for strategy parameters or ticker selection.
 
@@ -272,6 +278,9 @@ def run_optimisation(
             messages.
         fold_results_callback: Optional callback invoked with per-fold
             walk-forward results when walk_forward is True.
+        load_one_ticker: Optional single-ticker loader override (for caching).
+        get_top_companies: Optional top-companies loader override (for
+            caching).
 
     Returns:
         A tuple containing:
@@ -279,13 +288,19 @@ def run_optimisation(
             - Performance metrics for the optimised strategy.
     """
     if strategy_type == "Buy and Hold":
-        top_companies = get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
+        top_companies_loader = (
+            get_top_companies
+            if get_top_companies is not None
+            else get_top_sp500_companies
+        )
+        top_companies = top_companies_loader(NUM_TOP_COMPANIES_ONE_TICKER)
         best_ticker, strategy_params, metrics = optimise_buy_and_hold_ticker(
             top_companies,
             start_date,
             end_date,
             progress_callback=progress_callback,
             status_callback=status_callback,
+            load_one_ticker=load_one_ticker,
         )
         if status_callback is not None:
             status_callback(f"Best ticker for Buy and Hold: {best_ticker}")
@@ -321,6 +336,8 @@ def optimise_buy_and_hold_ticker(
     end_date: datetime.date,
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
+    load_one_ticker: Callable[[str, datetime.date, datetime.date], pl.DataFrame | None]
+    | None = None,
 ) -> tuple[str, dict[str, Any], dict[str, float]]:
     """Optimise ticker selection for the Buy and Hold strategy.
 
@@ -335,6 +352,7 @@ def optimise_buy_and_hold_ticker(
         progress_callback: Optional callback invoked as
             (current, total, message) for each candidate ticker.
         status_callback: Optional callback invoked with summary messages.
+        load_one_ticker: Optional single-ticker loader override (for caching).
 
     Returns:
         A tuple containing the best ticker, strategy parameters, and
@@ -344,6 +362,11 @@ def optimise_buy_and_hold_ticker(
     best_test_data = None
     best_total_return = float("-inf")
     evaluated_tickers = 0
+    ticker_loader = (
+        load_one_ticker
+        if load_one_ticker is not None
+        else load_yfinance_data_one_ticker
+    )
 
     total_tickers = len(top_companies)
 
@@ -355,7 +378,7 @@ def optimise_buy_and_hold_ticker(
                 f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}",
             )
 
-        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+        data = ticker_loader(ticker, start_date, end_date)
         if data is None or data.is_empty():
             continue
 
@@ -402,6 +425,8 @@ def optimise_single_ticker_strategy_ticker(
     strategy_params: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
+    load_one_ticker: Callable[[str, datetime.date, datetime.date], pl.DataFrame | None]
+    | None = None,
 ) -> str:
     """Optimise ticker selection for single-ticker strategies.
 
@@ -418,6 +443,7 @@ def optimise_single_ticker_strategy_ticker(
         progress_callback: Optional callback invoked as
             (current, total, message) for each candidate ticker.
         status_callback: Optional callback invoked with summary messages.
+        load_one_ticker: Optional single-ticker loader override (for caching).
 
     Returns:
         The best ticker.
@@ -425,6 +451,11 @@ def optimise_single_ticker_strategy_ticker(
     best_ticker = None
     best_sharpe_ratio = float("-inf")
     evaluated_tickers = 0
+    ticker_loader = (
+        load_one_ticker
+        if load_one_ticker is not None
+        else load_yfinance_data_one_ticker
+    )
 
     total_tickers = len(top_companies)
 
@@ -442,7 +473,7 @@ def optimise_single_ticker_strategy_ticker(
                 f"Evaluating ticker {i + 1} / {total_tickers}: {ticker}",
             )
 
-        data = load_yfinance_data_one_ticker(ticker, start_date, end_date)
+        data = ticker_loader(ticker, start_date, end_date)
         if data is None or data.is_empty():
             continue
 
@@ -565,6 +596,11 @@ def optimise_pairs_trading_tickers(
     cointegration_p_value_threshold: float = COINTEGRATION_P_VALUE_THRESHOLD,
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
+    load_two_tickers: Callable[
+        [str, str, datetime.date, datetime.date], pl.DataFrame | None
+    ]
+    | None = None,
+    same_company_check: Callable[[str, str], bool] | None = None,
 ) -> tuple[tuple[str, str], dict[str, Any], dict[str, float]]:
     """Optimise ticker pair selection and parameters for pairs trading.
 
@@ -584,6 +620,9 @@ def optimise_pairs_trading_tickers(
         progress_callback: Optional callback invoked as
             (current, total, message) for each candidate pair.
         status_callback: Optional callback invoked with summary messages.
+        load_two_tickers: Optional two-ticker loader override (for caching).
+        same_company_check: Optional same-company predicate override (for
+            caching).
 
     Returns:
         A tuple containing the best ticker pair, best parameters, and best
@@ -595,8 +634,15 @@ def optimise_pairs_trading_tickers(
     best_test_data = None
     best_sharpe_ratio = float("-inf")
     evaluated_pairs = 0
+    pair_loader = (
+        load_two_tickers
+        if load_two_tickers is not None
+        else load_yfinance_data_two_tickers
+    )
 
-    ticker_pairs = _candidate_pairs(top_companies)
+    ticker_pairs = _candidate_pairs(
+        top_companies, same_company_check=same_company_check
+    )
     total_combinations = len(ticker_pairs)
     parameter_combinations = 0
     optimisation_parameter_ranges = None
@@ -620,10 +666,11 @@ def optimise_pairs_trading_tickers(
                 total_combinations,
                 f"Evaluating pair {i + 1} / {total_combinations}: "
                 f"{ticker1} vs. {ticker2} "
-                f"(prev. pair processing time: {prev_pair_processing_time:.4f} seconds)",
+                f"(prev. pair processing time: "
+                f"{prev_pair_processing_time:.4f} seconds)",
             )
 
-        data = load_yfinance_data_two_tickers(ticker1, ticker2, start_date, end_date)
+        data = pair_loader(ticker1, ticker2, start_date, end_date)
         if data is None or data.is_empty():
             continue
 
@@ -865,12 +912,18 @@ def _parameter_values(
     return [value]
 
 
-def _candidate_pairs(top_companies: list[tuple[str, float]]) -> list[tuple[str, str]]:
+def _candidate_pairs(
+    top_companies: list[tuple[str, float]],
+    same_company_check: Callable[[str, str], bool] | None = None,
+) -> list[tuple[str, str]]:
     """Return ticker pairs after excluding likely same-company pairs."""
+    check_same = (
+        same_company_check if same_company_check is not None else is_same_company
+    )
     ticker_pairs = list(
         itertools.combinations([company[0] for company in top_companies], 2)
     )
-    return [pair for pair in ticker_pairs if not is_same_company(pair[0], pair[1])]
+    return [pair for pair in ticker_pairs if not check_same(pair[0], pair[1])]
 
 
 def run_backtest(
