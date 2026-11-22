@@ -10,6 +10,10 @@ from quant_trading_strategy_backtester.strategy_params import (
     validate_strategy_params,
 )
 
+# Relative variance tolerance for guarding floating-point cancellation on
+# collinear or constant-spread series.
+_SPREAD_VARIANCE_REL_TOL = 1e-13
+
 
 class PairsTradingStrategy(BaseStrategy):
     """Implement a market-neutral pairs trading strategy for two assets.
@@ -35,9 +39,11 @@ class PairsTradingStrategy(BaseStrategy):
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
         """Generate trading signals based on the pairs trading strategy.
 
-        Calculates the rolling hedge ratio and spread between two assets,
-        computes the z-score of the spread, and generates stateful signals and
-        entry-locked leg weights using the entry and exit thresholds.
+        Calculates the rolling OLS hedge ratio and spread between two assets,
+        computes the window-consistent spread mean, sample standard deviation,
+        and z-score using the current window's hedge ratio across the lookback
+        window, and generates stateful signals and entry-locked leg weights
+        using the entry and exit thresholds.
 
         Trading Logic:
             - Requires a finite positive rolling hedge ratio and positive
@@ -61,6 +67,10 @@ class PairsTradingStrategy(BaseStrategy):
             Columns include:
             - 'hedge_ratio': The rolling OLS beta of asset 1 against asset 2.
             - 'spread': The hedge-ratio-adjusted spread between the two assets.
+            - 'spread_mean': The lookback mean of the spread evaluated using
+              the current window's 'hedge_ratio'.
+            - 'spread_std': The lookback sample standard deviation (ddof=1) of
+              the spread evaluated using the current window's 'hedge_ratio'.
             - 'z_score': The standardised score of the spread.
             - 'signal': The trading signal (-1, 0, or 1).
             - 'leg_1_weight' and 'leg_2_weight': The entry-locked normalised
@@ -125,9 +135,18 @@ class PairsTradingStrategy(BaseStrategy):
                 ]
             )
             .lazy()
-            # Estimate the rolling OLS beta of asset 1 against asset 2.
+            # Estimate rolling moments (ddof=1) for OLS beta and spread stats.
             .with_columns(
                 [
+                    pl.col("Close_1")
+                    .rolling_mean(window_size=self.window, min_samples=self.window)
+                    .alias("close_1_mean"),
+                    pl.col("Close_2")
+                    .rolling_mean(window_size=self.window, min_samples=self.window)
+                    .alias("close_2_mean"),
+                    pl.col("Close_1")
+                    .rolling_var(window_size=self.window, min_samples=self.window)
+                    .alias("close_1_variance"),
                     pl.col("Close_2")
                     .rolling_var(window_size=self.window, min_samples=self.window)
                     .alias("close_2_variance"),
@@ -145,34 +164,73 @@ class PairsTradingStrategy(BaseStrategy):
                         pl.col("close_2_variance").is_not_null()
                         & pl.col("close_2_variance").is_finite()
                         & (pl.col("close_2_variance") > 0)
+                        & pl.col("close_covariance").is_not_null()
+                        & pl.col("close_covariance").is_finite()
                     )
                     .then(pl.col("close_covariance") / pl.col("close_2_variance"))
                     .otherwise(None)
                     .alias("hedge_ratio")
                 ]
             )
+            # Evaluate spread and its lookback mean/variance with beta_t.
             .with_columns(
                 [
                     (
                         pl.col("Close_1") - pl.col("hedge_ratio") * pl.col("Close_2")
-                    ).alias("spread")
+                    ).alias("spread"),
+                    pl.when(
+                        pl.col("hedge_ratio").is_not_null()
+                        & pl.col("hedge_ratio").is_finite()
+                    )
+                    .then(
+                        pl.col("close_1_mean")
+                        - pl.col("hedge_ratio") * pl.col("close_2_mean")
+                    )
+                    .otherwise(None)
+                    .alias("spread_mean"),
+                    pl.when(
+                        pl.col("hedge_ratio").is_not_null()
+                        & pl.col("hedge_ratio").is_finite()
+                    )
+                    .then(
+                        pl.col("close_1_variance")
+                        - 2.0 * pl.col("hedge_ratio") * pl.col("close_covariance")
+                        + pl.col("hedge_ratio").pow(2) * pl.col("close_2_variance")
+                    )
+                    .otherwise(None)
+                    .alias("spread_variance"),
                 ]
             )
-            # Calculate rolling mean and std.
+            # Clamp near-zero residual variance to 0.0 to avoid rounding noise.
             .with_columns(
                 [
-                    pl.col("spread")
-                    .rolling_mean(
-                        window_size=self.window,
-                        min_samples=self.window,
+                    pl.when(
+                        pl.col("spread_variance").is_null()
+                        | ~pl.col("spread_variance").is_finite()
+                        | pl.col("close_1_variance").is_null()
+                        | ~pl.col("close_1_variance").is_finite()
+                        | pl.col("close_1_mean").is_null()
+                        | ~pl.col("close_1_mean").is_finite()
+                        | pl.col("close_2_mean").is_null()
+                        | ~pl.col("close_2_mean").is_finite()
                     )
-                    .alias("spread_mean"),
-                    pl.col("spread")
-                    .rolling_std(
-                        window_size=self.window,
-                        min_samples=self.window,
+                    .then(None)
+                    .when(
+                        pl.col("spread_variance")
+                        <= _SPREAD_VARIANCE_REL_TOL
+                        * (
+                            pl.col("close_1_variance")
+                            + pl.col("close_1_mean").pow(2)
+                            + (
+                                pl.col("hedge_ratio")
+                                * pl.col("close_1_mean")
+                                * pl.col("close_2_mean")
+                            ).abs()
+                        )
                     )
-                    .alias("spread_std"),
+                    .then(0.0)
+                    .otherwise(pl.col("spread_variance").sqrt())
+                    .alias("spread_std")
                 ]
             )
             # Calculate z-score, guarding zero std and non-positive beta.
@@ -187,7 +245,16 @@ class PairsTradingStrategy(BaseStrategy):
                     .alias("z_score")
                 ]
             )
-            .drop(["close_2_variance", "close_covariance"])
+            .drop(
+                [
+                    "close_1_mean",
+                    "close_2_mean",
+                    "close_1_variance",
+                    "close_2_variance",
+                    "close_covariance",
+                    "spread_variance",
+                ]
+            )
             .collect()
         )
 
