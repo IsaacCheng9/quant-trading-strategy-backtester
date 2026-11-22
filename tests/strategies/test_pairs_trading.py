@@ -2,6 +2,7 @@
 Tests for the Pairs Trading strategy class.
 """
 
+import math
 from datetime import date, timedelta
 
 import polars as pl
@@ -190,6 +191,12 @@ def test_pairs_trading_strategy_is_invariant_to_second_leg_price_scale() -> None
 
     assert base_signals["spread"].to_list() == pytest.approx(
         scaled_signals["spread"].to_list(), nan_ok=True
+    )
+    assert base_signals["spread_mean"].to_list() == pytest.approx(
+        scaled_signals["spread_mean"].to_list(), nan_ok=True
+    )
+    assert base_signals["spread_std"].to_list() == pytest.approx(
+        scaled_signals["spread_std"].to_list(), nan_ok=True
     )
     assert base_signals["z_score"].to_list() == pytest.approx(
         scaled_signals["z_score"].to_list(), nan_ok=True
@@ -452,3 +459,152 @@ def test_pairs_trading_rejects_non_positive_prices_and_flattens_open_trades() ->
     assert signals["signal"][52] == 0.0
     assert signals["z_score"][54] == 0.0
     assert signals["signal"][54] == 0.0
+
+
+def test_pairs_trading_spread_stats_match_window_consistent_reference() -> None:
+    """Verify spread stats use the current window beta across the lookback."""
+    window = 10
+    num_days = 50
+    start_date = date(2020, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    # Vary Close_2 and shift the true slope across regimes so rolling beta_t
+    # changes materially over time.
+    close_2 = [100.0 + 0.8 * i + 6.0 * math.sin(i * 0.5) for i in range(num_days)]
+    close_1 = []
+    for i, c2 in enumerate(close_2):
+        slope = 1.0 + 2.5 * (i / (num_days - 1))
+        residual = 3.0 * math.cos(i * 0.9) + (1.5 if i % 5 == 0 else -0.5)
+        close_1.append(20.0 + slope * c2 + residual)
+
+    data = pl.DataFrame({"Date": dates, "Close_1": close_1, "Close_2": close_2})
+    strategy = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 1.5, "exit_z_score": 0.5}
+    )
+    signals = strategy.generate_signals(data)
+
+    # Output schema must stay unchanged without leaking intermediate columns.
+    expected_columns = [
+        "Date",
+        "Close_1",
+        "Close_2",
+        "hedge_ratio",
+        "spread",
+        "spread_mean",
+        "spread_std",
+        "z_score",
+        "signal",
+        "leg_1_weight",
+        "leg_2_weight",
+        "leg_1_weight_change",
+        "leg_2_weight_change",
+        "position_change",
+    ]
+    assert signals.columns == expected_columns
+
+    # Warmup rows before index (window - 1) have null spread stats and 0 z.
+    for idx in range(window - 1):
+        assert signals["hedge_ratio"][idx] is None
+        assert signals["spread"][idx] is None
+        assert signals["spread_mean"][idx] is None
+        assert signals["spread_std"][idx] is None
+        assert signals["z_score"][idx] == 0.0
+
+    # First valid row must be at index (window - 1), not (2 * window - 2).
+    assert signals["hedge_ratio"][window - 1] is not None
+    assert signals["spread_mean"][window - 1] is not None
+    assert signals["spread_std"][window - 1] is not None
+    assert signals["spread_std"][window - 1] > 0.0
+
+    ref_betas: list[float] = []
+    for t in range(window - 1, num_days):
+        c1_win = close_1[t - window + 1 : t + 1]
+        c2_win = close_2[t - window + 1 : t + 1]
+        mean_1 = sum(c1_win) / window
+        mean_2 = sum(c2_win) / window
+        var_2 = sum((y - mean_2) ** 2 for y in c2_win) / (window - 1)
+        cov_12 = sum(
+            (x - mean_1) * (y - mean_2) for x, y in zip(c1_win, c2_win, strict=True)
+        ) / (window - 1)
+        beta_t = cov_12 / var_2
+        ref_betas.append(beta_t)
+
+        window_spread = [x - beta_t * y for x, y in zip(c1_win, c2_win, strict=True)]
+        ref_mean = sum(window_spread) / window
+        ref_var = sum((s - ref_mean) ** 2 for s in window_spread) / (window - 1)
+        ref_std = math.sqrt(ref_var)
+        ref_z = (
+            (window_spread[-1] - ref_mean) / ref_std
+            if beta_t > 0.0 and ref_std > 0.0
+            else 0.0
+        )
+
+        assert signals["hedge_ratio"][t] == pytest.approx(beta_t, rel=1e-10)
+        assert signals["spread"][t] == pytest.approx(window_spread[-1], rel=1e-10)
+        assert signals["spread_mean"][t] == pytest.approx(ref_mean, rel=1e-10)
+        assert signals["spread_std"][t] == pytest.approx(ref_std, rel=1e-10)
+        assert signals["z_score"][t] == pytest.approx(ref_z, rel=1e-10)
+
+    # Confirm rolling beta changed materially and the naive rolling-spread
+    # method over mixed historical betas would diverge visibly.
+    assert max(ref_betas) - min(ref_betas) > 1.0
+    naive_stats = signals.select(
+        naive_mean=pl.col("spread").rolling_mean(
+            window_size=window, min_samples=window
+        ),
+        naive_std=pl.col("spread").rolling_std(window_size=window, min_samples=window),
+    )
+    mean_diffs = [
+        abs(signals["spread_mean"][t] - naive_stats["naive_mean"][t])
+        for t in range(2 * window - 2, num_days)
+    ]
+    std_diffs = [
+        abs(signals["spread_std"][t] - naive_stats["naive_std"][t])
+        for t in range(2 * window - 2, num_days)
+    ]
+    assert max(mean_diffs) > 5.0
+    assert max(std_diffs) > 1.0
+
+
+@pytest.mark.parametrize(
+    ("scale", "step"),
+    [
+        (1e-4, 1.0),
+        (1.0, 1.0),
+        (1.0, 0.3),
+        (1e6, 1.0),
+    ],
+)
+def test_pairs_trading_collinear_series_sets_zero_std_and_z_score(
+    scale: float, step: float
+) -> None:
+    """Verify exact collinearity yields zero spread_std and zero z_score."""
+    window = 10
+    num_days = 40
+    start_date = date(2020, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    close_2 = [scale * (100.0 + step * i) for i in range(num_days)]
+    intercept = 15.0 * scale
+    close_1 = [intercept + 2.0 * price for price in close_2]
+    data = pl.DataFrame({"Date": dates, "Close_1": close_1, "Close_2": close_2})
+
+    strategy = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    )
+    signals = strategy.generate_signals(data)
+
+    for idx in range(window - 1):
+        assert signals["spread_std"][idx] is None
+        assert signals["z_score"][idx] == 0.0
+
+    valid = signals.slice(window - 1)
+    assert valid["hedge_ratio"].to_list() == pytest.approx(
+        [2.0] * (num_days - window + 1)
+    )
+    assert valid["spread_mean"].to_list() == pytest.approx(
+        [intercept] * (num_days - window + 1)
+    )
+    assert (valid["spread_std"] == 0.0).all()
+    assert (valid["z_score"] == 0.0).all()
+    assert (valid["signal"] == 0.0).all()
