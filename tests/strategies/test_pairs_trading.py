@@ -279,7 +279,7 @@ def test_pairs_trading_short_exits_on_gap_through_exit_band() -> None:
 
 
 def test_pairs_trading_direct_flip_on_opposite_entry_gap() -> None:
-    """Verify a position flips directly when z-score gaps past opposite entry."""
+    """Verify a position flips directly on an opposite-entry z-score gap."""
     data = _make_gap_pair_data({30: -4.0, 31: 12.0})
 
     params = {"window": 15, "entry_z_score": 2.0, "exit_z_score": 0.5}
@@ -301,7 +301,7 @@ def test_pairs_trading_direct_flip_on_opposite_entry_gap() -> None:
 
 
 def test_pairs_trading_blocks_negative_hedge_ratio_entries() -> None:
-    """Verify negative rolling beta never opens a position or same-sign legs."""
+    """Verify negative rolling beta blocks entries and same-sign legs."""
     start_date = date(2020, 1, 1)
     num_days = 80
     dates = [start_date + timedelta(days=i) for i in range(num_days)]
@@ -330,7 +330,7 @@ def test_pairs_trading_blocks_negative_hedge_ratio_entries() -> None:
 def test_pairs_trading_closes_open_position_when_hedge_ratio_turns_non_positive() -> (
     None
 ):
-    """Verify an open trade exits to flat if rolling beta turns non-positive."""
+    """Verify an open trade flattens if rolling beta turns non-positive."""
     strategy = PairsTradingStrategy(
         {"window": 10, "entry_z_score": 2.0, "exit_z_score": 0.5}
     )
@@ -356,7 +356,7 @@ def test_pairs_trading_closes_open_position_when_hedge_ratio_turns_non_positive(
 def test_pairs_trading_locks_leg_weights_while_holding_and_limits_trade_events() -> (
     None
 ):
-    """Verify held positions keep constant weights and do not inflate trades."""
+    """Verify held trades keep constant weights without inflating events."""
     data = _make_shocked_pair_data(num_days=100)
     params = {"window": 20, "entry_z_score": 1.5, "exit_z_score": 0.5}
     strategy = PairsTradingStrategy(params)
@@ -385,7 +385,7 @@ def test_pairs_trading_locks_leg_weights_while_holding_and_limits_trade_events()
         weights_with_prev["prev_w2"].to_list()
     )
 
-    # Run Backtester and confirm Trade Events matches actual signal transitions.
+    # Run Backtester and confirm Trade Events matches signal transitions.
     backtester = Backtester(data, strategy)
     results = backtester.run()
     metrics = backtester.get_performance_metrics()
@@ -398,3 +398,57 @@ def test_pairs_trading_locks_leg_weights_while_holding_and_limits_trade_events()
     ledger = build_trade_ledger(results)
     assert ledger.height == signal_transitions
     assert "Rebalance" not in ledger["Action"].to_list()
+
+
+def test_pairs_trading_rejects_non_positive_prices_and_flattens_open_trades() -> None:
+    """Verify zero or negative prices block entry and flatten open trades."""
+    strategy = PairsTradingStrategy(
+        {"window": 10, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    )
+    indicators = pl.DataFrame(
+        {
+            "Close_1": [100.0, 0.0, 100.0, 100.0, 100.0, 0.0, 100.0, -5.0],
+            "Close_2": [50.0, 50.0, -50.0, 50.0, 50.0, 50.0, 50.0, 50.0],
+            "hedge_ratio": [2.0] * 8,
+            "spread": [10.0] * 8,
+            "spread_mean": [10.0] * 8,
+            "spread_std": [1.0] * 8,
+            "z_score": [0.0, -2.5, -2.5, -2.5, -1.5, -1.5, -2.5, -1.5],
+        }
+    )
+
+    signal_values, leg_1_weights, leg_2_weights = strategy._generate_stateful_signals(
+        indicators
+    )
+
+    # Indices 1 (Close_1=0) and 2 (Close_2=-50) must stay flat; index 3 enters
+    # long, index 5 flattens on Close_1=0, index 6 re-enters, index 7 flattens
+    # on Close_1=-5.
+    assert signal_values == [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0]
+    assert leg_1_weights[1:3] == [0.0, 0.0]
+    assert leg_2_weights[1:3] == [0.0, 0.0]
+    assert leg_1_weights[3] > 0.0
+    assert leg_2_weights[3] < 0.0
+    assert abs(leg_1_weights[3]) + abs(leg_2_weights[3]) == pytest.approx(1.0)
+    assert leg_1_weights[5] == 0.0
+    assert leg_2_weights[5] == 0.0
+    assert leg_1_weights[7] == 0.0
+    assert leg_2_weights[7] == 0.0
+
+    # End-to-end check that non-positive Close rows produce z_score == 0.0.
+    data = _make_shocked_pair_data(num_days=85)
+    bad_prices = data.with_columns(
+        pl.when(pl.int_range(pl.len()) == 52)
+        .then(0.0)
+        .when(pl.int_range(pl.len()) == 54)
+        .then(-10.0)
+        .otherwise(pl.col("Close_2"))
+        .alias("Close_2")
+    )
+    signals = PairsTradingStrategy(
+        {"window": 10, "entry_z_score": 1.5, "exit_z_score": 0.5}
+    ).generate_signals(bad_prices)
+    assert signals["z_score"][52] == 0.0
+    assert signals["signal"][52] == 0.0
+    assert signals["z_score"][54] == 0.0
+    assert signals["signal"][54] == 0.0

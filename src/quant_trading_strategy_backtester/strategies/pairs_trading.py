@@ -91,13 +91,22 @@ class PairsTradingStrategy(BaseStrategy):
         if "Close_1" not in data.columns or "Close_2" not in data.columns:
             raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
 
+        prices_are_valid = (
+            pl.col("Close_1").is_not_null()
+            & pl.col("Close_1").is_finite()
+            & (pl.col("Close_1") > 0)
+            & pl.col("Close_2").is_not_null()
+            & pl.col("Close_2").is_finite()
+            & (pl.col("Close_2") > 0)
+        )
         hedge_ratio_is_valid = (
             pl.col("hedge_ratio").is_not_null()
             & pl.col("hedge_ratio").is_finite()
             & (pl.col("hedge_ratio") > 0)
         )
         valid_spread_band = (
-            hedge_ratio_is_valid
+            prices_are_valid
+            & hedge_ratio_is_valid
             & pl.col("spread").is_not_null()
             & pl.col("spread").is_finite()
             & pl.col("spread_mean").is_not_null()
@@ -166,7 +175,7 @@ class PairsTradingStrategy(BaseStrategy):
                     .alias("spread_std"),
                 ]
             )
-            # Calculate z-score, avoiding division by zero and non-positive beta.
+            # Calculate z-score, guarding zero std and non-positive beta.
             .with_columns(
                 [
                     pl.when(valid_spread_band)
@@ -272,9 +281,7 @@ class PairsTradingStrategy(BaseStrategy):
                         leg_2_weight = 0.0
                     elif new_signal != signal:
                         leg_1_weight = new_signal * leg_1_notional / gross_notional
-                        leg_2_weight = (
-                            -new_signal * hedge_ratio_val * close_2_val / gross_notional
-                        )
+                        leg_2_weight = -new_signal * leg_2_notional / gross_notional
                     signal = new_signal
 
             signals.append(signal)
@@ -318,7 +325,9 @@ class PairsTradingStrategy(BaseStrategy):
         """Return whether a row has valid prices, positive beta, and spread."""
         return (
             PairsTradingStrategy._is_finite_number(close_1)
+            and float(close_1) > 0.0
             and PairsTradingStrategy._is_finite_number(close_2)
+            and float(close_2) > 0.0
             and PairsTradingStrategy._is_finite_number(hedge_ratio)
             and float(hedge_ratio) > 0.0
             and PairsTradingStrategy._is_finite_number(spread)
