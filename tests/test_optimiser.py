@@ -2293,7 +2293,7 @@ def test_optimise_pairs_trading_tickers_batch_downloads_once_and_joins_pairs(
         batch_calls.append(tuple(tickers))
         return batch_data
 
-    def mock_run_backtest(data, strategy_type, params, tickers):
+    def mock_run_backtest(data, strategy_type, params, tickers, **_kwargs):
         pair = tuple(tickers)
         seen_train_lengths[pair] = len(data)
         sharpe = 2.5 if pair == ("AAPL", "GOOG") else 1.0

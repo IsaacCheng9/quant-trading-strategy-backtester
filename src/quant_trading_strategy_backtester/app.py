@@ -30,6 +30,7 @@ from quant_trading_strategy_backtester.benchmark import (
 from quant_trading_strategy_backtester.cointegration import evaluate_cointegration
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
+    get_sp500_company_ciks,
     get_top_sp500_companies,
     is_same_company,
     load_yfinance_data_many_tickers,
@@ -127,9 +128,24 @@ def _cached_get_full_company_name(ticker: str) -> str | None:
 
 
 @st.cache_data
+def _cached_get_sp500_company_ciks() -> dict[str, str]:
+    """Cache Wikipedia S&P 500 ticker-to-CIK mappings across reruns."""
+    return get_sp500_company_ciks()
+
+
+def _get_sp500_company_ciks_cached() -> dict[str, str]:
+    """Return cached S&P 500 CIKs without retaining transient empty results."""
+    ciks = _cached_get_sp500_company_ciks()
+    if not ciks:
+        _cached_get_sp500_company_ciks.clear()
+    return ciks
+
+
+@st.cache_data
 def _cached_is_same_company(ticker1: str, ticker2: str) -> bool:
-    """Cache Yahoo Finance same-company checks across Streamlit reruns."""
-    return is_same_company(ticker1, ticker2)
+    """Cache same-company checks across Streamlit reruns."""
+    company_ciks = _get_sp500_company_ciks_cached()
+    return is_same_company(ticker1, ticker2, company_ciks=company_ciks)
 
 
 @contextmanager

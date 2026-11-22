@@ -213,21 +213,25 @@ def load_yfinance_data_many_tickers(
     """Fetch adjusted close prices for many tickers in one Yahoo Finance call.
 
     Preserve missing observations per ticker so pairwise extraction can drop
-    null rows independently for each ticker pair.
+    null rows independently for each ticker pair. Advance end_date by one day
+    when calling yfinance because Yahoo Finance treats its end bound as
+    exclusive, keeping end_date inclusive for callers.
 
     Args:
         tickers: Ticker symbols to download in a single batch.
-        start_date: Start date for the historical price data.
-        end_date: End date for the historical price data.
+        start_date: Inclusive start date for the historical price data.
+        end_date: Inclusive end date for the historical price data.
 
     Returns:
         A Polars DataFrame containing a ``Date`` column and one close-price
         column per available normalised ticker symbol.
 
     Raises:
-        ValueError: If Yahoo Finance returns malformed columns for a
-            multi-ticker request or duplicate close columns for one ticker.
+        ValueError: If start_date is on or after end_date, or if Yahoo Finance
+            returns malformed columns or duplicate close columns for one
+            ticker.
     """
+    _validate_date_range(start_date, end_date)
     normalised_tickers = list(
         dict.fromkeys(
             cleaned for ticker in tickers if (cleaned := ticker.strip().upper())
@@ -236,14 +240,15 @@ def load_yfinance_data_many_tickers(
     if not normalised_tickers:
         return _empty_many_ticker_data()
 
+    exclusive_end = end_date + datetime.timedelta(days=1)
     data = yf.download(
         normalised_tickers,
         start=start_date,
-        end=end_date,
+        end=exclusive_end,
         auto_adjust=True,
     )
-    data = cast(pd.DataFrame, data)
-    if data.empty:
+    data = cast(pd.DataFrame | None, data)
+    if data is None or data.empty:
         return _empty_many_ticker_data()
 
     close_columns: dict[str, object] = {}
@@ -263,7 +268,12 @@ def load_yfinance_data_many_tickers(
                     f"found {len(matches)}"
                 )
             close_columns[ticker] = data[matches[0]].to_numpy()
-    elif len(normalised_tickers) == 1 and "Close" in data.columns:
+    elif len(normalised_tickers) == 1:
+        if "Close" not in data.columns:
+            raise ValueError(
+                f"Expected Close column for single-ticker yfinance data "
+                f"({normalised_tickers[0]})"
+            )
         close_columns[normalised_tickers[0]] = data["Close"].to_numpy()
     else:
         raise ValueError("Expected MultiIndex columns for multi-ticker yfinance data")
@@ -405,7 +415,9 @@ def get_sp500_company_ciks() -> dict[str, str]:
 
     ciks = _extract_sp500_ciks(sp500_constituents)
     with _CACHE_LOCK:
-        _SP500_CIK_CACHE.update(ciks)
+        if ciks:
+            _SP500_CIK_CACHE.clear()
+            _SP500_CIK_CACHE.update(ciks)
         return dict(_SP500_CIK_CACHE)
 
 
@@ -416,10 +428,10 @@ def get_ticker_market_cap(ticker: str) -> tuple[str, float | None]:
         ticker: The stock ticker symbol.
 
     Returns:
-        A tuple containing the normalised ticker symbol and market cap if
-        available.
+        A tuple containing the stripped, uppercased ticker symbol and market
+        cap if available.
     """
-    normalised_ticker = normalise_yfinance_ticker(ticker)
+    normalised_ticker = ticker.strip().upper()
     try:
         data = yf.Ticker(normalised_ticker).info
     except Exception as exc:  # noqa: BLE001
@@ -452,6 +464,7 @@ def get_top_sp500_companies(num_companies: int) -> list[tuple[str, float]]:
     ciks = _extract_sp500_ciks(sp500_constituents)
     if ciks:
         with _CACHE_LOCK:
+            _SP500_CIK_CACHE.clear()
             _SP500_CIK_CACHE.update(ciks)
 
     tickers = list(

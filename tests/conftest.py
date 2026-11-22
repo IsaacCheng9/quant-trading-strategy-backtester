@@ -173,6 +173,7 @@ def mock_yfinance_functions(monkeypatch):
     app._cached_load_yfinance_data_two_tickers.clear()
     app._cached_load_yfinance_data_many_tickers.clear()
     app._cached_get_top_sp500_companies.clear()
+    app._cached_get_sp500_company_ciks.clear()
     app._cached_get_full_company_name.clear()
     app._cached_is_same_company.clear()
     app._cached_run_backtest.clear()

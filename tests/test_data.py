@@ -18,6 +18,7 @@ from quant_trading_strategy_backtester.data import (
     extract_pair_close_data,
     get_full_company_name,
     get_sp500_company_ciks,
+    get_ticker_market_cap,
     get_top_sp500_companies,
     is_same_company,
     load_yfinance_data_many_tickers,
@@ -501,6 +502,8 @@ def test_load_yfinance_data_many_tickers_and_extract_pair_close_data(
     def mock_download(tickers, **kwargs):
         download_calls.append(list(tickers))
         assert kwargs["auto_adjust"] is True
+        assert kwargs["start"] == datetime.date(2020, 1, 1)
+        assert kwargs["end"] == datetime.date(2020, 1, 6)
         columns = pd.MultiIndex.from_tuples(
             [
                 ("Close", "AAPL"),
@@ -580,3 +583,123 @@ def test_load_yfinance_data_many_tickers_handles_ticker_first_and_single_flat(
     )
     assert single_batch.columns == ["Date", "AAPL"]
     assert single_batch["AAPL"].to_list() == [50.0, 51.0, 52.0]
+
+
+def test_exchange_suffixed_tickers_preserved_in_market_cap_and_batch_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify exchange-suffixed tickers like VOD.L keep their dot suffix."""
+    queried_tickers: list[str] = []
+    downloaded_tickers: list[list[str]] = []
+
+    class FakeTicker:
+        def __init__(self, symbol: str) -> None:
+            queried_tickers.append(symbol)
+            self.info = {"marketCap": 25_000_000_000.0}
+
+    def mock_download(tickers, **kwargs):
+        downloaded_tickers.append(list(tickers))
+        dates = pd.date_range(start="2020-01-01", periods=2)
+        columns = pd.MultiIndex.from_tuples([("Close", "VOD.L"), ("Close", "RY.TO")])
+        return pd.DataFrame([[1.5, 100.0], [1.6, 101.0]], index=dates, columns=columns)
+
+    monkeypatch.setattr("yfinance.Ticker", FakeTicker)
+    monkeypatch.setattr("yfinance.download", mock_download)
+
+    symbol, market_cap = get_ticker_market_cap(" vod.l ")
+    batch = load_yfinance_data_many_tickers(
+        ["vod.l", "RY.TO"],
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 3),
+    )
+
+    assert symbol == "VOD.L"
+    assert market_cap == 25_000_000_000.0
+    assert queried_tickers == ["VOD.L"]
+    assert downloaded_tickers == [["VOD.L", "RY.TO"]]
+    assert batch.columns == ["Date", "VOD.L", "RY.TO"]
+
+
+def test_load_yfinance_data_many_tickers_edge_cases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify empty, MultiIndex, all-NaN, invalid-date, and malformed cases."""
+    dates = pd.date_range(start="2020-01-01", periods=3)
+
+    # Inverted or equal dates must fail before calling yfinance.
+    monkeypatch.setattr(
+        "yfinance.download",
+        lambda *_a, **_k: pytest.fail("Should not call yf.download for invalid dates"),
+    )
+    with pytest.raises(ValueError, match="start_date must be earlier than end_date"):
+        load_yfinance_data_many_tickers(
+            ["AAPL"], datetime.date(2020, 1, 4), datetime.date(2020, 1, 4)
+        )
+
+    # Empty or whitespace-only ticker list should skip downloading.
+    monkeypatch.setattr(
+        "yfinance.download",
+        lambda *_a, **_k: pytest.fail("Should not call yf.download for empty tickers"),
+    )
+    assert load_yfinance_data_many_tickers(
+        [], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+    ).is_empty()
+    assert load_yfinance_data_many_tickers(
+        ["  ", ""], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+    ).is_empty()
+
+    # Empty DataFrame or None response returns an empty frame.
+    monkeypatch.setattr("yfinance.download", lambda *_a, **_k: pd.DataFrame())
+    assert load_yfinance_data_many_tickers(
+        ["AAPL"], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+    ).is_empty()
+    monkeypatch.setattr("yfinance.download", lambda *_a, **_k: None)
+    assert load_yfinance_data_many_tickers(
+        ["AAPL"], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+    ).is_empty()
+
+    # Single-ticker MultiIndex response works cleanly.
+    monkeypatch.setattr(
+        "yfinance.download",
+        lambda *_a, **_k: pd.DataFrame(
+            [[10.0], [11.0], [12.0]],
+            index=dates,
+            columns=pd.MultiIndex.from_tuples([("Close", "AAPL")]),
+        ),
+    )
+    single_mi = load_yfinance_data_many_tickers(
+        ["AAPL"], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+    )
+    assert single_mi["AAPL"].to_list() == [10.0, 11.0, 12.0]
+
+    # All-NaN column produces an empty pair frame when extracted.
+    monkeypatch.setattr(
+        "yfinance.download",
+        lambda *_a, **_k: pd.DataFrame(
+            [
+                [10.0, float("nan")],
+                [11.0, float("nan")],
+                [12.0, float("nan")],
+            ],
+            index=dates,
+            columns=pd.MultiIndex.from_tuples([("Close", "AAPL"), ("Close", "DEAD")]),
+        ),
+    )
+    nan_batch = load_yfinance_data_many_tickers(
+        ["AAPL", "DEAD"], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+    )
+    assert extract_pair_close_data(nan_batch, "AAPL", "DEAD").is_empty()
+
+    # Malformed flat single-ticker and multi-ticker responses raise ValueError.
+    monkeypatch.setattr(
+        "yfinance.download",
+        lambda *_a, **_k: pd.DataFrame({"Open": [1.0, 2.0, 3.0]}, index=dates),
+    )
+    with pytest.raises(ValueError, match="Expected Close column for single-ticker"):
+        load_yfinance_data_many_tickers(
+            ["AAPL"], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+        )
+    with pytest.raises(ValueError, match="Expected MultiIndex columns"):
+        load_yfinance_data_many_tickers(
+            ["AAPL", "MSFT"], datetime.date(2020, 1, 1), datetime.date(2020, 1, 4)
+        )
