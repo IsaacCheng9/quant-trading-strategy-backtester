@@ -608,3 +608,82 @@ def test_pairs_trading_collinear_series_sets_zero_std_and_z_score(
     assert (valid["spread_std"] == 0.0).all()
     assert (valid["z_score"] == 0.0).all()
     assert (valid["signal"] == 0.0).all()
+
+
+def test_pairs_trading_collinear_large_beta_cross_moment_clamps_to_zero() -> None:
+    """Verify high-beta collinear pairs clamp rolling_cov noise to zero."""
+    window = 20
+    num_days = 60
+    start_date = date(2020, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    close_2 = [500.0 + 0.01 * math.sin(0.7 * i) for i in range(num_days)]
+    close_1 = [5.0 + 200.0 * (price - 500.0) for price in close_2]
+    data = pl.DataFrame({"Date": dates, "Close_1": close_1, "Close_2": close_2})
+
+    signals = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    ).generate_signals(data)
+
+    valid = signals.slice(window - 1)
+    assert (valid["spread_std"] == 0.0).all()
+    assert (valid["z_score"] == 0.0).all()
+    assert (valid["signal"] == 0.0).all()
+
+
+def test_pairs_trading_tight_spread_and_degenerate_window_edge_cases() -> None:
+    """Verify tight spreads stay unclamped and constant/null legs stay safe."""
+    window = 15
+    num_days = 50
+    start_date = date(2020, 1, 1)
+    dates = [start_date + timedelta(days=i) for i in range(num_days)]
+
+    # Tight $0.005 residual noise on a $500 ETF pair must not be clamped to 0.
+    close_2 = [500.0 + 0.5 * i + 2.0 * math.sin(0.4 * i) for i in range(num_days)]
+    residuals = [0.005 if i % 2 == 0 else -0.005 for i in range(num_days)]
+    close_1 = [close_2[i] + residuals[i] for i in range(num_days)]
+    tight_signals = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    ).generate_signals(
+        pl.DataFrame({"Date": dates, "Close_1": close_1, "Close_2": close_2})
+    )
+    assert (tight_signals.slice(window - 1)["spread_std"] > 0.003).all()
+
+    # Constant Close_1 yields zero beta and zero spread_std without NaN.
+    const_1 = pl.DataFrame(
+        {"Date": dates, "Close_1": [100.0] * num_days, "Close_2": close_2}
+    )
+    const_1_signals = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    ).generate_signals(const_1)
+    assert (const_1_signals.slice(window - 1)["spread_std"] == 0.0).all()
+    assert (const_1_signals["z_score"] == 0.0).all()
+
+    # Constant Close_2 yields null hedge_ratio/spread_std and zero z_score.
+    const_2 = pl.DataFrame(
+        {"Date": dates, "Close_1": close_1, "Close_2": [100.0] * num_days}
+    )
+    const_2_signals = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    ).generate_signals(const_2)
+    assert const_2_signals["spread_std"].null_count() == num_days
+    assert (const_2_signals["z_score"] == 0.0).all()
+
+    # A None value inside a window nulls affected rows and recovers cleanly.
+    with_null: list[float | None] = list(close_1)
+    with_null[20] = None
+    null_signals = PairsTradingStrategy(
+        {"window": window, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    ).generate_signals(
+        pl.DataFrame(
+            {
+                "Date": dates,
+                "Close_1": pl.Series(with_null, dtype=pl.Float64),
+                "Close_2": close_2,
+            }
+        )
+    )
+    assert null_signals["spread_std"][20] is None
+    assert null_signals["z_score"][20] == 0.0
+    assert null_signals["spread_std"][20 + window] is not None
+    assert float(null_signals["spread_std"][20 + window]) > 0.0

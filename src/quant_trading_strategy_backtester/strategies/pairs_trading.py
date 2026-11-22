@@ -12,7 +12,7 @@ from quant_trading_strategy_backtester.strategy_params import (
 
 # Relative variance tolerance for guarding floating-point cancellation on
 # collinear or constant-spread series.
-_SPREAD_VARIANCE_REL_TOL = 1e-12
+_SPREAD_VARIANCE_REL_TOL = 1e-13
 
 
 class PairsTradingStrategy(BaseStrategy):
@@ -211,12 +211,22 @@ class PairsTradingStrategy(BaseStrategy):
                         | ~pl.col("close_1_variance").is_finite()
                         | pl.col("close_1_mean").is_null()
                         | ~pl.col("close_1_mean").is_finite()
+                        | pl.col("close_2_mean").is_null()
+                        | ~pl.col("close_2_mean").is_finite()
                     )
                     .then(None)
                     .when(
                         pl.col("spread_variance")
                         <= _SPREAD_VARIANCE_REL_TOL
-                        * (pl.col("close_1_variance") + pl.col("close_1_mean").pow(2))
+                        * (
+                            pl.col("close_1_variance")
+                            + pl.col("close_1_mean").pow(2)
+                            + (
+                                pl.col("hedge_ratio")
+                                * pl.col("close_1_mean")
+                                * pl.col("close_2_mean")
+                            ).abs()
+                        )
                     )
                     .then(0.0)
                     .otherwise(pl.col("spread_variance").sqrt())
