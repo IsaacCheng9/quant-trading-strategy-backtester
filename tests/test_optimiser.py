@@ -26,12 +26,14 @@ from quant_trading_strategy_backtester.optimiser import (
     evaluate_validation_period,
     get_training_data,
     get_validation_data,
+    get_walk_forward_oos_data,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
     optimise_strategy_params,
     run_backtest,
     run_optimisation,
+    stitch_walk_forward_oos_results,
     walk_forward_optimise,
 )
 
@@ -987,6 +989,9 @@ def test_walk_forward_optimise():
         assert "params" in fold
         assert "in_sample_sharpe" in fold
         assert "oos_metrics" in fold
+        assert "oos_results" in fold
+        assert isinstance(fold["oos_results"], pl.DataFrame)
+        assert len(fold["oos_results"]) == fold["test_rows"]
 
     # Training window should expand across folds.
     assert fold_results[0]["train_rows"] < fold_results[1]["train_rows"]
@@ -994,6 +999,202 @@ def test_walk_forward_optimise():
 
     # Best params should come from the final fold.
     assert best_params == fold_results[-1]["params"]
+
+    # Returned metrics should match stitching the per-fold OOS results.
+    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(fold_results)
+    assert len(stitched_results) == sum(fold["test_rows"] for fold in fold_results)
+    assert agg_metrics == pytest.approx(stitched_metrics, nan_ok=True)
+
+
+def _make_fold_oos_results(
+    start_date: datetime.date,
+    strategy_returns: list[float],
+    trade_turnovers: list[float],
+    cost_rate: float = 0.0008,
+    initial_capital: float = 100000.0,
+) -> pl.DataFrame:
+    """Build synthetic per-fold OOS results for stitching tests."""
+    dates = [
+        start_date + datetime.timedelta(days=i) for i in range(len(strategy_returns))
+    ]
+    transaction_costs = [turnover * cost_rate for turnover in trade_turnovers]
+    gross_returns = [
+        net_return + cost
+        for net_return, cost in zip(strategy_returns, transaction_costs, strict=True)
+    ]
+    frame = pl.DataFrame(
+        {
+            "Date": dates,
+            "gross_strategy_returns": gross_returns,
+            "strategy_returns": strategy_returns,
+            "transaction_costs": transaction_costs,
+            "trade_turnover": trade_turnovers,
+        }
+    )
+    return frame.with_columns(
+        [
+            (1 + pl.col("gross_strategy_returns"))
+            .cum_prod()
+            .alias("gross_cumulative_returns"),
+            (1 + pl.col("strategy_returns")).cum_prod().alias("cumulative_returns"),
+            (initial_capital * (1 + pl.col("strategy_returns")).cum_prod()).alias(
+                "equity_curve"
+            ),
+            pl.col("transaction_costs").cum_sum().alias("cumulative_transaction_costs"),
+        ]
+    )
+
+
+def test_stitch_walk_forward_oos_results_compounds_total_return() -> None:
+    """Verify stitched total return compounds returns instead of averaging."""
+    fold1_returns = [0.10, 0.10]
+    fold2_returns = [-0.10, 0.05]
+    fold1 = _make_fold_oos_results(datetime.date(2020, 1, 1), fold1_returns, [1.0, 0.0])
+    fold2 = _make_fold_oos_results(datetime.date(2020, 1, 3), fold2_returns, [1.0, 0.0])
+
+    fold_results = [
+        {"fold": 1, "oos_results": fold1},
+        {"fold": 2, "oos_results": fold2},
+    ]
+
+    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(fold_results)
+
+    expected_total_return = math.prod(1 + r for r in fold1_returns + fold2_returns) - 1
+    fold1_return = math.prod(1 + r for r in fold1_returns) - 1
+    fold2_return = math.prod(1 + r for r in fold2_returns) - 1
+    mean_fold_return = (fold1_return + fold2_return) / 2
+
+    assert len(stitched_results) == 4
+    assert stitched_metrics["Total Return"] == pytest.approx(expected_total_return)
+    assert stitched_metrics["Total Return"] != pytest.approx(mean_fold_return)
+
+
+def test_stitch_walk_forward_oos_results_captures_cross_fold_drawdown() -> None:
+    """Verify stitched max drawdown captures cross-fold losses."""
+    fold1 = _make_fold_oos_results(
+        datetime.date(2020, 1, 1), [0.20, -0.05], [1.0, 0.0], cost_rate=0.0
+    )
+    fold2 = _make_fold_oos_results(
+        datetime.date(2020, 1, 3), [-0.10, -0.10], [0.0, 0.0], cost_rate=0.0
+    )
+
+    _, fold1_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 1, "oos_results": fold1}]
+    )
+    _, fold2_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 2, "oos_results": fold2}]
+    )
+    _, stitched_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 1, "oos_results": fold1}, {"fold": 2, "oos_results": fold2}]
+    )
+
+    # Peak on day 1 is 1.20; trough on day 4 is 1.20 * 0.95 * 0.90 * 0.90.
+    expected_cross_fold_dd = (0.95 * 0.90 * 0.90) - 1.0
+    assert stitched_metrics["Max Drawdown"] == pytest.approx(expected_cross_fold_dd)
+    assert abs(stitched_metrics["Max Drawdown"]) > abs(fold1_metrics["Max Drawdown"])
+    assert abs(stitched_metrics["Max Drawdown"]) > abs(fold2_metrics["Max Drawdown"])
+
+
+def test_stitch_walk_forward_oos_results_sums_trade_activity_and_costs() -> None:
+    """Verify trade events, turnover, and costs sum across folds."""
+    fold1 = _make_fold_oos_results(
+        datetime.date(2020, 1, 1), [0.01, -0.005, 0.02], [1.0, 0.0, 2.0]
+    )
+    fold2 = _make_fold_oos_results(
+        datetime.date(2020, 1, 4), [0.005, 0.01, -0.01], [1.5, 0.5, 1.0]
+    )
+
+    _, fold1_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 1, "oos_results": fold1}]
+    )
+    _, fold2_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 2, "oos_results": fold2}]
+    )
+    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 1, "oos_results": fold1}, {"fold": 2, "oos_results": fold2}]
+    )
+
+    assert stitched_metrics["Trade Events"] == pytest.approx(
+        fold1_metrics["Trade Events"] + fold2_metrics["Trade Events"]
+    )
+    assert stitched_metrics["Trade Events"] == 5.0
+    assert stitched_metrics["Total Turnover"] == pytest.approx(
+        fold1_metrics["Total Turnover"] + fold2_metrics["Total Turnover"]
+    )
+    assert stitched_metrics["Total Costs"] == pytest.approx(
+        fold1_metrics["Total Costs"] + fold2_metrics["Total Costs"]
+    )
+    assert stitched_results["cumulative_transaction_costs"][-1] == pytest.approx(
+        stitched_metrics["Total Costs"]
+    )
+
+
+def test_stitch_walk_forward_oos_results_ignores_zero_trade_fold_nan_sharpe() -> None:
+    """Verify a zero-trade fold NaN Sharpe does not poison stitched Sharpe."""
+    active_fold = _make_fold_oos_results(
+        datetime.date(2020, 1, 1), [0.01, 0.02, -0.005, 0.015], [1.0, 0.0, 0.0, 1.0]
+    )
+    flat_fold = _make_fold_oos_results(
+        datetime.date(2020, 1, 5), [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]
+    )
+
+    _, flat_metrics = stitch_walk_forward_oos_results(
+        [{"fold": 2, "oos_results": flat_fold}]
+    )
+    assert math.isnan(flat_metrics["Sharpe Ratio"])
+
+    _, stitched_metrics = stitch_walk_forward_oos_results(
+        [
+            {"fold": 1, "oos_results": active_fold},
+            {"fold": 2, "oos_results": flat_fold},
+        ]
+    )
+    assert math.isfinite(stitched_metrics["Sharpe Ratio"])
+    assert stitched_metrics["Sharpe Ratio"] > 0.0
+
+
+def test_walk_forward_optimise_includes_trailing_remainder_rows() -> None:
+    """Verify trailing remainder rows are assigned to the final fold."""
+    n_rows = 63
+    n_folds = 3
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    closes = [100.0 + i * 0.5 for i in range(n_rows)]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+
+    _, _, fold_results = walk_forward_optimise(
+        data,
+        "Moving Average Crossover",
+        {"short_window": [3, 5], "long_window": [10, 15]},
+        tickers="TEST",
+        n_folds=n_folds,
+    )
+
+    assert [fold["test_rows"] for fold in fold_results] == [15, 15, 18]
+    assert sum(fold["test_rows"] for fold in fold_results) + fold_results[0][
+        "train_rows"
+    ] == len(data)
+    assert fold_results[-1]["oos_results"]["Date"][-1] == dates[-1]
+
+    final_fold = get_validation_data(data, walk_forward=True, n_folds=n_folds)
+    assert len(final_fold) == 18
+    assert final_fold["Date"][0] == dates[45]
+    assert final_fold["Date"][-1] == dates[-1]
+
+    oos_data = get_walk_forward_oos_data(data, n_folds=n_folds)
+    assert len(oos_data) == 48
+    assert oos_data["Date"][0] == dates[15]
+    assert oos_data["Date"][-1] == dates[-1]
+
+
+def test_stitch_walk_forward_oos_results_rejects_empty_inputs() -> None:
+    """Verify stitching rejects empty fold lists or empty fold frames."""
+    with pytest.raises(ValueError, match="must not be empty"):
+        stitch_walk_forward_oos_results([])
+
+    with pytest.raises(ValueError, match="non-empty oos_results"):
+        stitch_walk_forward_oos_results([{"fold": 1, "oos_results": pl.DataFrame()}])
 
 
 def test_walk_forward_optimise_insufficient_data():

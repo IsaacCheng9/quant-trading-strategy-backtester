@@ -241,20 +241,47 @@ def plot_pairs_spread(
         )
     )
 
-    # Entry/exit threshold bands.
-    for val, label, dash in [
-        (entry_z_score, f"Entry ({entry_z_score})", "dash"),
-        (-entry_z_score, f"Entry ({-entry_z_score})", "dash"),
-        (exit_z_score, f"Exit ({exit_z_score})", "dot"),
-        (-exit_z_score, f"Exit ({-exit_z_score})", "dot"),
-    ]:
-        fig.add_hline(
-            y=val,
-            line_dash=dash,
-            line_color="grey",
-            opacity=0.6,
-            annotation_text=label,
-        )
+    # Draw step-function threshold bands when walk-forward folds vary params.
+    has_per_row_thresholds = (
+        "entry_z_score" in results.columns and "exit_z_score" in results.columns
+    )
+    thresholds_vary = has_per_row_thresholds and (
+        results["entry_z_score"].n_unique() > 1
+        or results["exit_z_score"].n_unique() > 1
+    )
+    if thresholds_vary:
+        entry_series = results["entry_z_score"].cast(pl.Float64).to_list()
+        exit_series = results["exit_z_score"].cast(pl.Float64).to_list()
+        for values, label, dash in [
+            (entry_series, "Entry (+)", "dash"),
+            ([-val for val in entry_series], "Entry (-)", "dash"),
+            (exit_series, "Exit (+)", "dot"),
+            ([-val for val in exit_series], "Exit (-)", "dot"),
+        ]:
+            fig.add_trace(
+                go.Scatter(
+                    x=dates,
+                    y=values,
+                    mode="lines",
+                    line={"dash": dash, "color": "grey", "shape": "hv"},
+                    opacity=0.6,
+                    name=label,
+                )
+            )
+    else:
+        for val, label, dash in [
+            (entry_z_score, f"Entry ({entry_z_score})", "dash"),
+            (-entry_z_score, f"Entry ({-entry_z_score})", "dash"),
+            (exit_z_score, f"Exit ({exit_z_score})", "dot"),
+            (-exit_z_score, f"Exit ({-exit_z_score})", "dot"),
+        ]:
+            fig.add_hline(
+                y=val,
+                line_dash=dash,
+                line_color="grey",
+                opacity=0.6,
+                annotation_text=label,
+            )
 
     # Mark position changes on the z-score line.
     buys = results.filter(pl.col("position_change") > 0)

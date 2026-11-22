@@ -69,8 +69,7 @@ def _split_data(
 def get_validation_data(
     data: pl.DataFrame, walk_forward: bool = False, n_folds: int = WALK_FORWARD_FOLDS
 ) -> pl.DataFrame:
-    """
-    Return the held-out data used for final validation display.
+    """Return the held-out data used for final validation display.
 
     Args:
         data: Historical price data.
@@ -78,8 +77,8 @@ def get_validation_data(
         n_folds: Number of walk-forward test folds.
 
     Returns:
-        The test split for standard optimisation, or the final test fold for
-        walk-forward optimisation.
+        The test split for standard optimisation, or the final test fold
+        (including any trailing remainder rows) for walk-forward optimisation.
     """
     if walk_forward:
         segment_size = len(data) // (n_folds + 1)
@@ -88,10 +87,35 @@ def get_validation_data(
                 f"Not enough data for {n_folds} folds: "
                 f"{len(data)} rows, need at least {2 * (n_folds + 1)}"
             )
-        return data[segment_size * n_folds : segment_size * (n_folds + 1)]
+        return data[segment_size * n_folds :]
 
     _, test_data = _split_data(data)
     return test_data
+
+
+def get_walk_forward_oos_data(
+    data: pl.DataFrame, n_folds: int = WALK_FORWARD_FOLDS
+) -> pl.DataFrame:
+    """Return the combined out-of-sample rows across walk-forward folds.
+
+    Args:
+        data: Historical price data.
+        n_folds: Number of walk-forward test folds.
+
+    Returns:
+        All rows evaluated out of sample across the walk-forward folds,
+        including any trailing remainder rows assigned to the final fold.
+
+    Raises:
+        ValueError: If there are too few rows for the requested folds.
+    """
+    segment_size = len(data) // (n_folds + 1)
+    if segment_size < 2:
+        raise ValueError(
+            f"Not enough data for {n_folds} folds: "
+            f"{len(data)} rows, need at least {2 * (n_folds + 1)}"
+        )
+    return data[segment_size:]
 
 
 def get_training_data(
@@ -245,6 +269,51 @@ def count_candidate_pairs(
 ) -> int:
     """Return pair candidates after same-company filtering."""
     return len(_candidate_pairs(top_companies, same_company_check=same_company_check))
+
+
+def run_walk_forward_optimisation(
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+    n_folds: int = WALK_FORWARD_FOLDS,
+    progress_callback: ProgressCallback | None = None,
+    status_callback: StatusCallback | None = None,
+    fold_results_callback: Callable[[list[dict[str, Any]]], None] | None = None,
+) -> tuple[dict[str, int | float], pl.DataFrame, dict[str, float]]:
+    """Run walk-forward optimisation and return stitched OOS results.
+
+    Args:
+        data: Historical price data.
+        strategy_type: The type of strategy being optimised.
+        strategy_params: Parameter ranges to test across walk-forward folds.
+        tickers: The ticker or tickers used in the backtest.
+        n_folds: Number of out-of-sample test folds.
+        progress_callback: Optional callback invoked as
+            (current, total, message) for each fold combination evaluation.
+        status_callback: Optional callback invoked with informational status
+            messages.
+        fold_results_callback: Optional callback invoked with per-fold
+            walk-forward results.
+
+    Returns:
+        A tuple containing the final-fold optimal parameters, stitched
+        out-of-sample results DataFrame, and stitched performance metrics.
+    """
+    best_params, _, fold_results = walk_forward_optimise(
+        data,
+        strategy_type,
+        cast(dict[str, range | list[int | float]], strategy_params),
+        tickers,
+        n_folds=n_folds,
+        progress_callback=progress_callback,
+        status_callback=status_callback,
+    )
+    stitched_results, stitched_metrics = stitch_walk_forward_oos_results(fold_results)
+    if fold_results_callback is not None:
+        fold_results_callback(fold_results)
+
+    return best_params, stitched_results, stitched_metrics
 
 
 def run_optimisation(
@@ -752,6 +821,76 @@ def optimise_pairs_trading_tickers(
     return best_pair, best_params, best_metrics
 
 
+def stitch_walk_forward_oos_results(
+    fold_results: list[dict[str, Any]],
+    initial_capital: float = 100000.0,
+) -> tuple[pl.DataFrame, dict[str, float]]:
+    """Stitch per-fold out-of-sample results into one continuous series.
+
+    Concatenate per-fold out-of-sample DataFrames in chronological order, reset
+    cumulative return, equity, and cost columns from initial_capital, and
+    compute stitched metrics using Backtester.
+
+    Args:
+        fold_results: Per-fold result dictionaries containing oos_results
+            DataFrames.
+        initial_capital: Starting capital for the stitched equity curve.
+
+    Returns:
+        A tuple of (stitched_results, stitched_metrics).
+
+    Raises:
+        ValueError: If fold_results is empty, any fold lacks non-empty
+            oos_results, or stitched metrics cannot be computed.
+    """
+    if not fold_results:
+        raise ValueError("Walk-forward fold results must not be empty")
+
+    ordered_folds = sorted(fold_results, key=lambda fold: fold.get("fold", 0))
+    oos_frames: list[pl.DataFrame] = []
+    for fold in ordered_folds:
+        oos_results = fold.get("oos_results")
+        if not isinstance(oos_results, pl.DataFrame) or oos_results.is_empty():
+            raise ValueError(
+                "Each walk-forward fold must include non-empty oos_results"
+            )
+        fold_params = fold.get("params")
+        if (
+            isinstance(fold_params, Mapping)
+            and "entry_z_score" in fold_params
+            and "exit_z_score" in fold_params
+        ):
+            oos_results = oos_results.with_columns(
+                [
+                    pl.lit(float(fold_params["entry_z_score"])).alias("entry_z_score"),
+                    pl.lit(float(fold_params["exit_z_score"])).alias("exit_z_score"),
+                ]
+            )
+        oos_frames.append(oos_results)
+
+    stitched_results = pl.concat(oos_frames, how="vertical")
+    if "Date" in stitched_results.columns:
+        stitched_results = stitched_results.sort("Date")
+    stitched_results = _reset_cumulative_result_columns(
+        stitched_results,
+        initial_capital,
+    )
+
+    backtester = Backtester(
+        stitched_results,
+        BuyAndHoldStrategy({}),
+        initial_capital=initial_capital,
+    )
+    backtester.results = stitched_results
+    stitched_metrics = backtester.get_performance_metrics(include_initial_period=True)
+    if stitched_metrics is None:
+        raise ValueError(
+            "Stitched walk-forward results produced no performance metrics"
+        )
+
+    return stitched_results, stitched_metrics
+
+
 def walk_forward_optimise(
     data: pl.DataFrame,
     strategy_type: str,
@@ -760,13 +899,16 @@ def walk_forward_optimise(
     n_folds: int = WALK_FORWARD_FOLDS,
     progress_callback: ProgressCallback | None = None,
     status_callback: StatusCallback | None = None,
-) -> tuple[dict[str, int | float], dict[str, float], list[dict]]:
+) -> tuple[dict[str, int | float], dict[str, float], list[dict[str, Any]]]:
     """Optimise strategy parameters using walk-forward validation.
 
-    Split data into (n_folds + 1) equal segments. For each fold, use an
-    expanding training window for grid search and evaluate the best parameters
-    on the next segment. This tests parameter stability across time rather than
-    depending on a single split point.
+    Split data into (n_folds + 1) base segments, assigning any trailing
+    remainder rows to the final fold so tail observations are not dropped. For
+    each fold, run grid search on the expanding training window and evaluate
+    that fold's in-sample optimal parameters on its out-of-sample fold with
+    prior rolling context. Concatenate the per-fold out-of-sample return
+    streams into one stitched out-of-sample series to compute portfolio-level
+    metrics.
 
     Args:
         data: Historical price data.
@@ -783,8 +925,8 @@ def walk_forward_optimise(
     Returns:
         A tuple containing:
             - Best parameters from the final fold.
-            - Aggregated out-of-sample metrics (mean across folds).
-            - Per-fold results with params and metrics.
+            - Stitched out-of-sample metrics across all folds.
+            - Per-fold results with params, oos_metrics, and oos_results.
     """
     n_rows = len(data)
     segment_size = n_rows // (n_folds + 1)
@@ -805,16 +947,16 @@ def walk_forward_optimise(
             "Parameter optimisation tests "
             f"{total_combinations} valid combinations across "
             f"{n_folds} expanding walk-forward folds. "
-            "Displayed optimisation metrics are aggregated out-of-sample "
+            "Displayed optimisation metrics are stitched out-of-sample "
             "fold results."
         )
 
-    fold_results: list[dict] = []
+    fold_results: list[dict[str, Any]] = []
     completed_steps = 0
 
     for fold in range(n_folds):
         train_end = segment_size * (fold + 1)
-        test_end = min(segment_size * (fold + 2), n_rows)
+        test_end = n_rows if fold == n_folds - 1 else segment_size * (fold + 2)
         train_data = data[:train_end]
         test_data = data[train_end:test_end]
 
@@ -842,7 +984,7 @@ def walk_forward_optimise(
             raise ValueError(f"Walk-forward optimisation failed on fold {fold + 1}")
 
         # Evaluate out of sample without cold-starting rolling strategy state.
-        _, oos_metrics = evaluate_validation_period(
+        oos_results, oos_metrics = evaluate_validation_period(
             data[:test_end],
             test_data,
             strategy_type,
@@ -858,20 +1000,17 @@ def walk_forward_optimise(
                 "params": best_params,
                 "in_sample_sharpe": best_sharpe,
                 "oos_metrics": oos_metrics,
+                "oos_results": oos_results,
             }
         )
 
-    # Aggregate out-of-sample metrics across folds.
-    metric_keys = fold_results[0]["oos_metrics"].keys()
-    aggregated_metrics = {
-        key: sum(f["oos_metrics"][key] for f in fold_results) / n_folds
-        for key in metric_keys
-    }
+    # Stitch per-fold out-of-sample results into one continuous return stream.
+    _, stitched_metrics = stitch_walk_forward_oos_results(fold_results)
 
     # Return best params from the final fold (largest training set).
     final_params = fold_results[-1]["params"]
 
-    return final_params, aggregated_metrics, fold_results
+    return final_params, stitched_metrics, fold_results
 
 
 def _valid_parameter_combinations(

@@ -36,16 +36,19 @@ from quant_trading_strategy_backtester.data import (
     load_yfinance_data_two_tickers,
 )
 from quant_trading_strategy_backtester.optimiser import (
+    WALK_FORWARD_FOLDS,
     ProgressCallback,
     create_strategy,
     evaluate_validation_period,
     get_training_data,
     get_validation_data,
+    get_walk_forward_oos_data,
     optimise_buy_and_hold_ticker,
     optimise_pairs_trading_tickers,
     optimise_single_ticker_strategy_ticker,
     run_backtest,
     run_optimisation,
+    run_walk_forward_optimisation,
 )
 from quant_trading_strategy_backtester.storage import (
     InMemoryStrategyStore,
@@ -170,6 +173,36 @@ def _run_optimisation_with_ui(
     return optimised_params, metrics
 
 
+def _run_walk_forward_optimisation_with_ui(
+    data: pl.DataFrame,
+    strategy_type: str,
+    strategy_params: dict[str, Any],
+    tickers: str | list[str],
+    n_folds: int = WALK_FORWARD_FOLDS,
+) -> tuple[dict[str, int | float], pl.DataFrame, dict[str, float]]:
+    """Run walk-forward optimisation with Streamlit progress and widgets."""
+    st.info("Optimising strategy. This may take a while...")
+    start_time = time.time()
+
+    with _streamlit_progress() as progress_callback:
+        best_params, stitched_results, stitched_metrics = run_walk_forward_optimisation(
+            data,
+            strategy_type,
+            strategy_params,
+            tickers,
+            n_folds=n_folds,
+            progress_callback=progress_callback,
+            status_callback=_display_status_message,
+            fold_results_callback=display_walk_forward_results,
+        )
+
+    duration = time.time() - start_time
+    st.success(f"Optimisation complete! Time taken: {duration:.4f} seconds")
+    st.header("Optimal Parameters")
+    st.write(best_params)
+    return best_params, stitched_results, stitched_metrics
+
+
 @st.cache_data
 def _cached_run_backtest(
     data: pl.DataFrame,
@@ -203,10 +236,12 @@ def _cached_evaluate_validation_period(
 
 
 def _get_final_backtest_data(
-    data: pl.DataFrame, use_validation_data: bool, walk_forward: bool
+    data: pl.DataFrame,
+    use_validation_data: bool,
+    walk_forward: bool,
+    walk_forward_results: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
-    """
-    Return the data used for the displayed and saved final backtest.
+    """Return the data used for the displayed and saved final backtest.
 
     Args:
         data: Full historical price data.
@@ -214,9 +249,12 @@ def _get_final_backtest_data(
             has already used the training period.
         walk_forward: Whether parameter optimisation used walk-forward
             validation.
+        walk_forward_results: Optional stitched walk-forward out-of-sample
+            results used to align raw price data by date.
 
     Returns:
-        Full data for plain backtests, or held-out validation data for
+        Full data for plain backtests, stitched out-of-sample data for
+        walk-forward optimisation, or held-out validation data for standard
         optimised backtests.
     """
     if not use_validation_data:
@@ -226,20 +264,34 @@ def _get_final_backtest_data(
         )
         return data
 
-    validation_data = get_validation_data(data, walk_forward=walk_forward)
-    training_data = get_training_data(data, walk_forward=walk_forward)
     if walk_forward:
+        if (
+            walk_forward_results is not None
+            and "Date" in data.columns
+            and "Date" in walk_forward_results.columns
+        ):
+            oos_data = data.join(
+                walk_forward_results.select("Date").unique(),
+                on="Date",
+                how="semi",
+            )
+        else:
+            oos_data = get_walk_forward_oos_data(data)
+        initial_train_rows = len(data) - len(oos_data)
         st.info(
-            "Displaying final walk-forward test-fold backtest results "
-            f"over {len(validation_data)} rows after expanding-window "
-            f"optimisation on {len(training_data)} prior rows."
+            "Displaying stitched walk-forward out-of-sample backtest results "
+            f"over {len(oos_data)} rows across {WALK_FORWARD_FOLDS} expanding "
+            f"folds (initial training window: {initial_train_rows} rows)."
         )
-    else:
-        st.info(
-            "Displaying held-out test-period backtest results over "
-            f"{len(validation_data)} rows after selection or optimisation "
-            f"on {len(training_data)} training rows."
-        )
+        return oos_data
+
+    validation_data = get_validation_data(data, walk_forward=False)
+    training_data = get_training_data(data, walk_forward=False)
+    st.info(
+        "Displaying held-out test-period backtest results over "
+        f"{len(validation_data)} rows after selection or optimisation "
+        f"on {len(training_data)} training rows."
+    )
     return validation_data
 
 
@@ -679,12 +731,16 @@ def prepare_pairs_trading_strategy_without_optimisation(
     strategy_params: dict[str, Any],
     optimise: bool,
     walk_forward: bool = False,
-) -> tuple[pl.DataFrame, str, dict[str, Any]]:
-    """
-    Handles the pairs trading strategy for user-selected tickers.
+) -> tuple[
+    pl.DataFrame,
+    str,
+    dict[str, Any],
+    tuple[pl.DataFrame, dict[str, float]] | None,
+]:
+    """Prepare the pairs trading strategy for user-selected tickers.
 
-    Loads historical data for the user-selected pair of tickers and optimises
-    the strategy parameters if requested.
+    Load historical data for the user-selected pair of tickers and optimise
+    strategy parameters if requested.
 
     Args:
         ticker: A tuple containing two ticker symbols.
@@ -700,6 +756,8 @@ def prepare_pairs_trading_strategy_without_optimisation(
             - A string representation of the selected pair.
             - Optimised strategy parameters if optimise is True,
               otherwise the initial strategy parameters.
+            - Stitched walk-forward (results, metrics) when optimise and
+              walk_forward are True, otherwise None.
     """
     ticker1, ticker2 = ticker
     data = _cached_load_yfinance_data_two_tickers(
@@ -708,7 +766,18 @@ def prepare_pairs_trading_strategy_without_optimisation(
     ticker_display = f"{ticker1} vs. {ticker2}"
     _display_cointegration_result(data, "selected date range")
 
-    if optimise:
+    walk_forward_oos: tuple[pl.DataFrame, dict[str, float]] | None = None
+    if optimise and walk_forward:
+        strategy_params, oos_results, oos_metrics = (
+            _run_walk_forward_optimisation_with_ui(
+                data,
+                "Pairs Trading",
+                strategy_params,
+                [ticker1, ticker2],
+            )
+        )
+        walk_forward_oos = (oos_results, oos_metrics)
+    elif optimise:
         strategy_params, _ = _run_optimisation_with_ui(
             data,
             "Pairs Trading",
@@ -716,10 +785,10 @@ def prepare_pairs_trading_strategy_without_optimisation(
             start_date,
             end_date,
             [ticker1, ticker2],
-            walk_forward=walk_forward,
+            walk_forward=False,
         )
 
-    return data, ticker_display, strategy_params
+    return data, ticker_display, strategy_params, walk_forward_oos
 
 
 def prepare_single_ticker_strategy(
@@ -730,11 +799,15 @@ def prepare_single_ticker_strategy(
     strategy_params: dict[str, Any],
     optimise: bool,
     walk_forward: bool = False,
-) -> tuple[pl.DataFrame, str, dict[str, Any]]:
-    """
-    Handles strategies for a single ticker.
+) -> tuple[
+    pl.DataFrame,
+    str,
+    dict[str, Any],
+    tuple[pl.DataFrame, dict[str, float]] | None,
+]:
+    """Prepare a strategy for a single user-selected ticker.
 
-    Loads historical data for a single ticker and optimises the strategy
+    Load historical data for a single ticker and optimise the strategy
     parameters if requested.
 
     Args:
@@ -752,20 +825,34 @@ def prepare_single_ticker_strategy(
             - The ticker symbol.
             - Optimised strategy parameters if optimise is True,
               otherwise the initial strategy parameters.
+            - Stitched walk-forward (results, metrics) when optimise and
+              walk_forward are True for a parameterised strategy, else None.
     """
     data = _cached_load_yfinance_data_one_ticker(ticker, start_date, end_date)
     ticker_display = ticker
+    walk_forward_oos: tuple[pl.DataFrame, dict[str, float]] | None = None
 
     if optimise and strategy_type != "Buy and Hold":
-        strategy_params, _ = _run_optimisation_with_ui(
-            data,
-            strategy_type,
-            strategy_params,
-            start_date,
-            end_date,
-            ticker,
-            walk_forward=walk_forward,
-        )
+        if walk_forward:
+            strategy_params, oos_results, oos_metrics = (
+                _run_walk_forward_optimisation_with_ui(
+                    data,
+                    strategy_type,
+                    strategy_params,
+                    ticker,
+                )
+            )
+            walk_forward_oos = (oos_results, oos_metrics)
+        else:
+            strategy_params, _ = _run_optimisation_with_ui(
+                data,
+                strategy_type,
+                strategy_params,
+                start_date,
+                end_date,
+                ticker,
+                walk_forward=False,
+            )
     elif optimise and strategy_type == "Buy and Hold":
         top_companies = _cached_get_top_sp500_companies(NUM_TOP_COMPANIES_ONE_TICKER)
         with _streamlit_progress() as progress_callback:
@@ -781,7 +868,7 @@ def prepare_single_ticker_strategy(
         ticker_display = best_ticker
         data = _cached_load_yfinance_data_one_ticker(ticker, start_date, end_date)
 
-    return data, ticker_display, strategy_params
+    return data, ticker_display, strategy_params, walk_forward_oos
 
 
 def _is_streamlit_cloud() -> bool:
@@ -912,9 +999,10 @@ def main():
         auto_select_tickers,
     )
 
-    # Initialise company names
+    # Initialise company names and optional stitched walk-forward outputs.
     company_name1 = None
     company_name2 = None
+    walk_forward_oos: tuple[pl.DataFrame, dict[str, float]] | None = None
 
     # Prepare the trading strategy based on user inputs
     if strategy_type == "Pairs Trading" and auto_select_tickers:
@@ -932,7 +1020,7 @@ def main():
         company_name1 = _cached_get_full_company_name(ticker1)
         company_name2 = _cached_get_full_company_name(ticker2)
     elif strategy_type == "Pairs Trading":
-        data, ticker_display, strategy_params = (
+        data, ticker_display, strategy_params, walk_forward_oos = (
             prepare_pairs_trading_strategy_without_optimisation(
                 cast(tuple[str, str], ticker),
                 start_date,
@@ -962,14 +1050,16 @@ def main():
         )
         company_name1 = _cached_get_full_company_name(ticker_display)
     else:
-        data, ticker_display, strategy_params = prepare_single_ticker_strategy(
-            cast(str, ticker),
-            start_date,
-            end_date,
-            strategy_type,
-            strategy_params,
-            optimise,
-            walk_forward,
+        data, ticker_display, strategy_params, walk_forward_oos = (
+            prepare_single_ticker_strategy(
+                cast(str, ticker),
+                start_date,
+                end_date,
+                strategy_type,
+                strategy_params,
+                optimise,
+                walk_forward,
+            )
         )
         company_name1 = _cached_get_full_company_name(ticker_display)
 
@@ -990,14 +1080,20 @@ def main():
         else ticker_display
     )
     use_validation_data = auto_select_tickers or optimise
+    walk_forward_results = walk_forward_oos[0] if walk_forward_oos is not None else None
     backtest_data = _get_final_backtest_data(
-        data, use_validation_data, walk_forward=walk_forward
+        data,
+        use_validation_data,
+        walk_forward=walk_forward,
+        walk_forward_results=walk_forward_results,
     )
     if backtest_data.is_empty():
         st.write("No validation data available for the selected ticker and date range")
         return
 
-    if use_validation_data:
+    if walk_forward_oos is not None:
+        results, metrics = walk_forward_oos
+    elif use_validation_data:
         results, metrics = _cached_evaluate_validation_period(
             data,
             backtest_data,
