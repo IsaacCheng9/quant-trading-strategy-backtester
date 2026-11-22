@@ -514,7 +514,7 @@ class Backtester:
             A dictionary containing performance metrics, or None if the
             backtest hasn't been run yet.
         """
-        if self.results is None:
+        if self.results is None or self.results.is_empty():
             return None
 
         total_return = (
@@ -575,9 +575,16 @@ class Backtester:
         Raises:
             ValueError: If run() has not been called yet.
         """
+        if self.results is None:
+            raise ValueError("Backtest hasn't been run yet. Call run() first.")
+        if self.results.is_empty():
+            raise ValueError("Backtest produced no results.")
+        if self.data.is_empty():
+            raise ValueError("Backtest data is empty.")
+
         metrics = self.get_performance_metrics()
         if metrics is None:
-            raise ValueError("Backtest hasn't been run yet. Call run() first.")
+            raise ValueError("Backtest produced no performance metrics.")
 
         strategy_params = self.strategy.get_parameters()
         strategy_name = self.strategy.__class__.__name__

@@ -108,3 +108,19 @@ def test_get_strategy_store_selects_sqlite_locally(
     store = _get_strategy_store()
 
     assert isinstance(store, SQLiteStrategyStore)
+
+
+def test_get_strategy_store_falls_back_to_in_memory_when_cwd_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify read-only working directory falls back to session-state store."""
+    monkeypatch.delenv("STREAMLIT_SHARING_MODE", raising=False)
+    monkeypatch.delenv("STREAMLIT_CLOUD", raising=False)
+    monkeypatch.setattr(app.os, "access", lambda *_args, **_kwargs: False)
+    fake_session_state: dict[str, object] = {}
+    monkeypatch.setattr(app.st, "session_state", fake_session_state)
+
+    store = _get_strategy_store()
+
+    assert isinstance(store, InMemoryStrategyStore)
+    assert "strategy_results" in fake_session_state

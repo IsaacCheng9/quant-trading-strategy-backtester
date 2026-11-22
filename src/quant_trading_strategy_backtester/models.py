@@ -1,6 +1,7 @@
 """SQLAlchemy ORM models and lazy database session helpers."""
 
 import datetime
+import threading
 from pathlib import Path
 
 from sqlalchemy import (
@@ -16,11 +17,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session as OrmSession
 from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 DEFAULT_DATABASE_URL = "sqlite:///strategies.db"
 
 Base = declarative_base()
 
+_CACHE_LOCK = threading.Lock()
 _ENGINES: dict[tuple[str, str | None], Engine] = {}
 _SESSION_FACTORIES: dict[tuple[str, str | None], sessionmaker[OrmSession]] = {}
 
@@ -30,19 +33,51 @@ def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+def _is_in_memory_sqlite_url(database_url: str) -> bool:
+    """Return whether a SQLAlchemy URL refers to an in-memory SQLite DB."""
+    return database_url in {"sqlite://", "sqlite:///:memory:"} or (
+        database_url.startswith("sqlite:") and ":memory:" in database_url
+    )
+
+
 def _database_cache_key(database_url: str) -> tuple[str, str | None]:
     """Return a cache key that scopes relative SQLite URLs by directory."""
-    if (
-        database_url.startswith("sqlite:///")
-        and not database_url.startswith("sqlite:////")
-        and database_url != "sqlite:///:memory:"
+    if database_url.startswith("sqlite:///") and not database_url.startswith(
+        "sqlite:////"
     ):
         return (database_url, str(Path.cwd()))
     return (database_url, None)
 
 
+def _create_initialised_engine(database_url: str) -> Engine:
+    """Create a SQLAlchemy engine and initialise tables for the given URL."""
+    if _is_in_memory_sqlite_url(database_url):
+        engine = create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        engine = create_engine(database_url)
+    Base.metadata.create_all(engine)
+    return engine
+
+
+def _get_or_create_engine_locked(database_url: str) -> Engine:
+    """Return a cached engine while holding _CACHE_LOCK."""
+    cache_key = _database_cache_key(database_url)
+    engine = _ENGINES.get(cache_key)
+    if engine is None:
+        engine = _create_initialised_engine(database_url)
+        _ENGINES[cache_key] = engine
+    return engine
+
+
 def get_engine(database_url: str = DEFAULT_DATABASE_URL) -> Engine:
-    """Return a cached SQLAlchemy engine with tables initialised lazily.
+    """Return a SQLAlchemy engine with tables initialised lazily.
+
+    Persistent URLs are cached safely across threads. In-memory SQLite URLs
+    bypass the global cache so independent stores remain isolated.
 
     Args:
         database_url: SQLAlchemy database URL.
@@ -50,19 +85,20 @@ def get_engine(database_url: str = DEFAULT_DATABASE_URL) -> Engine:
     Returns:
         An initialised SQLAlchemy Engine for the given URL.
     """
-    cache_key = _database_cache_key(database_url)
-    engine = _ENGINES.get(cache_key)
-    if engine is None:
-        engine = create_engine(database_url)
-        Base.metadata.create_all(engine)
-        _ENGINES[cache_key] = engine
-    return engine
+    if _is_in_memory_sqlite_url(database_url):
+        return _create_initialised_engine(database_url)
+
+    with _CACHE_LOCK:
+        return _get_or_create_engine_locked(database_url)
 
 
 def get_session_factory(
     database_url: str = DEFAULT_DATABASE_URL,
 ) -> sessionmaker[OrmSession]:
-    """Return a cached SQLAlchemy session factory initialised lazily.
+    """Return a SQLAlchemy session factory initialised lazily.
+
+    Persistent URLs are cached safely across threads. In-memory SQLite URLs
+    bypass the global cache so independent stores remain isolated.
 
     Args:
         database_url: SQLAlchemy database URL.
@@ -70,13 +106,17 @@ def get_session_factory(
     Returns:
         A sessionmaker bound to the lazily initialised engine for the URL.
     """
+    if _is_in_memory_sqlite_url(database_url):
+        return sessionmaker(bind=_create_initialised_engine(database_url))
+
     cache_key = _database_cache_key(database_url)
-    factory = _SESSION_FACTORIES.get(cache_key)
-    if factory is None:
-        engine = get_engine(database_url)
-        factory = sessionmaker(bind=engine)
-        _SESSION_FACTORIES[cache_key] = factory
-    return factory
+    with _CACHE_LOCK:
+        factory = _SESSION_FACTORIES.get(cache_key)
+        if factory is None:
+            engine = _get_or_create_engine_locked(database_url)
+            factory = sessionmaker(bind=engine)
+            _SESSION_FACTORIES[cache_key] = factory
+        return factory
 
 
 class StrategyModel(Base):

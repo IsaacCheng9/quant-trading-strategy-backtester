@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -277,3 +278,108 @@ def test_clear_database_resets_target_database_only(tmp_path: Path) -> None:
 
     assert store.list_recent() == []
     assert db_path.exists()
+
+
+def test_sqlite_store_rolls_back_and_closes_session_on_commit_error() -> None:
+    """Verify save() rolls back, closes the session, and raises ValueError."""
+    events: list[str] = []
+
+    class _FailingQuery:
+        def filter_by(self, **kwargs: object) -> "_FailingQuery":
+            return self
+
+        def all(self) -> list[object]:
+            return []
+
+    class _FailingSession:
+        def query(self, model: object) -> _FailingQuery:
+            return _FailingQuery()
+
+        def add(self, item: object) -> None:
+            events.append("add")
+
+        def commit(self) -> None:
+            events.append("commit")
+            raise RuntimeError("disk full")
+
+        def rollback(self) -> None:
+            events.append("rollback")
+
+        def close(self) -> None:
+            events.append("close")
+
+    store = SQLiteStrategyStore(session_factory=_FailingSession)
+
+    with pytest.raises(ValueError, match="Failed to save strategy results"):
+        store.save(_make_record())
+
+    assert events == ["add", "commit", "rollback", "close"]
+
+
+def test_sqlite_store_saves_none_tickers_against_legacy_not_null_schema(
+    tmp_path: Path,
+) -> None:
+    """Verify tickers=None saves and deduplicates on legacy NOT NULL schema."""
+    db_path = tmp_path / "legacy.db"
+    db_url = f"sqlite:///{db_path}"
+    engine = sqlalchemy.create_engine(db_url)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE strategies (
+                id INTEGER PRIMARY KEY,
+                date_created DATETIME,
+                name VARCHAR NOT NULL,
+                parameters JSON NOT NULL,
+                total_return FLOAT NOT NULL,
+                sharpe_ratio FLOAT,
+                max_drawdown FLOAT NOT NULL,
+                tickers JSON NOT NULL,
+                start_date DATE NOT NULL,
+                end_date DATE NOT NULL
+            )
+            """
+        )
+
+    store = SQLiteStrategyStore(database_url=db_url)
+    record = _make_record(tickers=None)
+
+    assert store.save(record) is True
+    assert store.save(record) is False
+
+    recent = store.list_recent()
+    assert len(recent) == 1
+    assert recent[0].tickers is None
+
+
+def test_in_memory_store_sorts_mixed_naive_and_aware_timestamps() -> None:
+    """Verify InMemoryStrategyStore orders naive and UTC datetimes safely."""
+    store = InMemoryStrategyStore()
+    naive_older = _make_record(
+        tickers="AAPL",
+        # Explicitly construct a naive legacy timestamp to test mixed sorting.
+        date_created=datetime(2024, 1, 1, 10, 0, 0),  # noqa: DTZ001
+    )
+    aware_newer = _make_record(
+        tickers="MSFT",
+        date_created=datetime(2024, 1, 1, 11, 0, 0, tzinfo=UTC),
+    )
+
+    assert store.save(naive_older) is True
+    assert store.save(aware_newer) is True
+
+    recent = store.list_recent()
+    assert [item.tickers for item in recent] == ["MSFT", "AAPL"]
+
+
+def test_in_memory_sqlite_stores_are_isolated_and_thread_safe() -> None:
+    """Verify :memory: URLs stay isolated per store and work cross-thread."""
+    store_a = SQLiteStrategyStore(database_url="sqlite:///:memory:")
+    store_b = SQLiteStrategyStore(database_url="sqlite:///:memory:")
+
+    assert store_a.save(_make_record(tickers="AAPL")) is True
+    assert store_b.list_recent() == []
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        recent = executor.submit(store_a.list_recent).result()
+    assert [item.tickers for item in recent] == ["AAPL"]
