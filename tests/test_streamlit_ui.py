@@ -3,6 +3,8 @@
 import datetime
 from typing import Any
 
+from streamlit.testing.v1 import AppTest
+
 from quant_trading_strategy_backtester import streamlit_ui
 from quant_trading_strategy_backtester.utils import (
     DEFAULT_INITIAL_CAPITAL,
@@ -199,3 +201,81 @@ def test_get_sidebar_inputs_forces_walk_forward_false_when_auto_selecting(
     assert "Ticker Symbol 2" not in harness.inside_widgets
     assert "Use Walk-Forward Validation" in harness.inside_widgets
     assert "Run Backtest" in harness.inside_widgets
+
+
+def _render_sidebar_for_apptest() -> None:
+    """Render sidebar inputs and validate fixed params inside AppTest."""
+    # AppTest.from_function executes the function body in an isolated module.
+    import streamlit as st
+
+    from quant_trading_strategy_backtester.strategy_params import (
+        validate_strategy_params,
+    )
+    from quant_trading_strategy_backtester.streamlit_ui import get_sidebar_inputs
+
+    config, submitted = get_sidebar_inputs()
+    st.session_state["last_config"] = config
+    st.session_state["last_submitted"] = submitted
+    if not config.optimise:
+        try:
+            validate_strategy_params(config.strategy_type, config.strategy_params)
+        except ValueError as exc:
+            st.error(str(exc))
+
+
+def test_apptest_mac_form_preserves_long_window_and_surfaces_invalid_params() -> None:
+    """Verify MAC sliders preserve submitted values and surface errors."""
+    app_test = AppTest.from_function(_render_sidebar_for_apptest).run()
+    app_test.sidebar.selectbox[0].select("Moving Average Crossover").run()
+
+    # Valid multi-slider update must not reset Long Window (Days) to default.
+    app_test.sidebar.slider[0].set_value(10)
+    app_test.sidebar.slider[1].set_value(120)
+    app_test.sidebar.button[0].click().run()
+    assert app_test.session_state["last_submitted"] is True
+    assert app_test.session_state["last_config"].strategy_params == {
+        "short_window": 10,
+        "long_window": 120,
+    }
+    assert len(app_test.error) == 0
+
+    # Invalid submission must keep user values and surface validation error.
+    app_test.sidebar.slider[0].set_value(40)
+    app_test.sidebar.slider[1].set_value(25)
+    app_test.sidebar.button[0].click().run()
+    assert app_test.session_state["last_config"].strategy_params == {
+        "short_window": 40,
+        "long_window": 25,
+    }
+    assert len(app_test.error) == 1
+    assert "short_window" in app_test.error[0].value
+
+
+def test_apptest_pairs_form_preserves_exit_z_and_surfaces_invalid_params() -> None:
+    """Verify Pairs sliders preserve submitted values and surface errors."""
+    app_test = AppTest.from_function(_render_sidebar_for_apptest).run()
+    app_test.sidebar.selectbox[0].select("Pairs Trading").run()
+
+    # Valid multi-slider update must keep Exit Z-Score rather than resetting.
+    app_test.sidebar.slider[1].set_value(1.2)
+    app_test.sidebar.slider[2].set_value(0.8)
+    app_test.sidebar.button[0].click().run()
+    assert app_test.session_state["last_submitted"] is True
+    assert app_test.session_state["last_config"].strategy_params == {
+        "window": 50,
+        "entry_z_score": 1.2,
+        "exit_z_score": 0.8,
+    }
+    assert len(app_test.error) == 0
+
+    # Invalid submission must keep user values and surface validation error.
+    app_test.sidebar.slider[1].set_value(1.0)
+    app_test.sidebar.slider[2].set_value(1.5)
+    app_test.sidebar.button[0].click().run()
+    assert app_test.session_state["last_config"].strategy_params == {
+        "window": 50,
+        "entry_z_score": 1.0,
+        "exit_z_score": 1.5,
+    }
+    assert len(app_test.error) == 1
+    assert "exit_z_score" in app_test.error[0].value

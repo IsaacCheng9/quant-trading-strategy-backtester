@@ -17,6 +17,7 @@ from quant_trading_strategy_backtester.backtester import (
     build_trade_ledger,
 )
 from quant_trading_strategy_backtester.models import StrategyModel
+from quant_trading_strategy_backtester.storage import InMemoryStrategyStore
 from quant_trading_strategy_backtester.strategies.base import BaseStrategy
 from quant_trading_strategy_backtester.strategies.buy_and_hold import BuyAndHoldStrategy
 from quant_trading_strategy_backtester.strategies.mean_reversion import (
@@ -906,3 +907,42 @@ def test_trade_ledger_records_pair_rebalances():
     assert ledger["Turnover"].to_list() == pytest.approx([1.0, 1 / 3])
     assert ledger["Leg 1 Weight"].to_list() == pytest.approx([0.5, 1 / 3])
     assert ledger["Leg 2 Weight"].to_list() == pytest.approx([-0.5, -2 / 3])
+
+
+def test_save_results_persists_distinct_trading_assumptions(
+    mock_polars_data: pl.DataFrame,
+    sqlite_store,
+) -> None:
+    """Verify runs differing only in trading assumptions are both saved."""
+    strategy = MovingAverageCrossoverStrategy({"short_window": 3, "long_window": 8})
+    memory_store = InMemoryStrategyStore()
+
+    default_bt = Backtester(mock_polars_data, strategy, tickers="AAPL")
+    default_bt.run()
+    custom_bt = Backtester(
+        mock_polars_data,
+        strategy,
+        initial_capital=250_000.0,
+        transaction_cost_bps=15.0,
+        slippage_bps=7.5,
+        tickers="AAPL",
+    )
+    custom_bt.run()
+
+    for store in (sqlite_store, memory_store):
+        assert default_bt.save_results(store=store) is True
+        assert custom_bt.save_results(store=store) is True
+        # Duplicate custom run should still deduplicate cleanly.
+        assert custom_bt.save_results(store=store) is False
+
+        records = store.list_recent()
+        assert len(records) == 2
+        saved_params = [record.parameters for record in records]
+        assert {"short_window": 3, "long_window": 8} in saved_params
+        assert {
+            "short_window": 3,
+            "long_window": 8,
+            "initial_capital": 250_000.0,
+            "transaction_cost_bps": 15.0,
+            "slippage_bps": 7.5,
+        } in saved_params

@@ -1966,7 +1966,7 @@ def test_optimise_single_ticker_picks_first_valid_parameter_combination(
     )
 
     assert best_ticker == "MSFT"
-    # (25, 20) is invalid because short_window >= long_window; (25, 50) is first valid.
+    # (25, 20) fails short_window < long_window; (25, 50) is first valid.
     assert used_params == [
         {
             "params": {"short_window": 25, "long_window": 50},
@@ -1984,7 +1984,7 @@ def test_optimise_single_ticker_picks_first_valid_parameter_combination(
 
 
 def test_optimise_single_ticker_raises_when_no_valid_parameter_combination() -> None:
-    """Verify ticker selection fails clearly when no parameter combo is valid."""
+    """Verify ticker selection fails when no parameter combo is valid."""
     with pytest.raises(ValueError, match="No valid parameter combinations"):
         optimise_single_ticker_strategy_ticker(
             [("AAPL", 2.0)],
@@ -1995,9 +1995,7 @@ def test_optimise_single_ticker_raises_when_no_valid_parameter_combination() -> 
         )
 
 
-def test_trading_assumptions_propagate_through_backtest_validation_and_walk_forward() -> (
-    None
-):
+def test_trading_assumptions_propagate_through_optimiser() -> None:
     """Verify custom capital and cost assumptions flow through optimiser."""
     dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(72)]
     closes = [100.0 + (i % 10) * 1.5 + i * 0.2 for i in range(72)]

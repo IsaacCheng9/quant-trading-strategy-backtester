@@ -46,20 +46,16 @@ class BacktestConfig:
 def _render_auto_select_checkbox(strategy_type: str) -> bool:
     """Render the automatic ticker selection checkbox in the sidebar."""
     if strategy_type == "Pairs Trading":
-        return bool(
-            st.sidebar.checkbox(
-                f"Explore Current Top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 Pairs"
-            )
+        return st.sidebar.checkbox(
+            f"Explore Current Top {NUM_TOP_COMPANIES_TWO_TICKERS} S&P 500 Pairs"
         )
     if strategy_type in [
         "Buy and Hold",
         "Mean Reversion",
         "Moving Average Crossover",
     ]:
-        return bool(
-            st.sidebar.checkbox(
-                f"Explore Current Top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 Companies"
-            )
+        return st.sidebar.checkbox(
+            f"Explore Current Top {NUM_TOP_COMPANIES_ONE_TICKER} S&P 500 Companies"
         )
 
     return False
@@ -99,7 +95,7 @@ def get_trading_assumptions(container: Any = None) -> tuple[float, float, float]
         target.number_input(
             "Initial Capital ($)",
             min_value=1.0,
-            value=float(DEFAULT_INITIAL_CAPITAL),
+            value=DEFAULT_INITIAL_CAPITAL,
             step=1000.0,
             format="%.2f",
         )
@@ -108,7 +104,7 @@ def get_trading_assumptions(container: Any = None) -> tuple[float, float, float]
         target.number_input(
             "Transaction Cost (bps)",
             min_value=0.0,
-            value=float(DEFAULT_TRANSACTION_COST_BPS),
+            value=DEFAULT_TRANSACTION_COST_BPS,
             step=0.5,
             format="%.2f",
         )
@@ -117,7 +113,7 @@ def get_trading_assumptions(container: Any = None) -> tuple[float, float, float]
         target.number_input(
             "Slippage (bps)",
             min_value=0.0,
-            value=float(DEFAULT_SLIPPAGE_BPS),
+            value=DEFAULT_SLIPPAGE_BPS,
             step=0.5,
             format="%.2f",
         )
@@ -138,14 +134,12 @@ def get_sidebar_inputs() -> tuple[BacktestConfig, bool]:
         A tuple of (config, submitted), where submitted is True when the user
         clicked 'Run Backtest' on the current rerun.
     """
-    strategy_type = str(
-        st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
-    )
+    strategy_type = st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
     auto_select_tickers = _render_auto_select_checkbox(strategy_type)
     optimise = (
         False
         if strategy_type == "Buy and Hold"
-        else bool(st.sidebar.checkbox("Optimise Strategy Parameters"))
+        else st.sidebar.checkbox("Optimise Strategy Parameters")
     )
 
     with st.sidebar.form("backtest_config"):
@@ -163,16 +157,14 @@ def get_sidebar_inputs() -> tuple[BacktestConfig, bool]:
             strategy_params = {}
         elif optimise:
             strategy_params = get_optimisation_ranges(strategy_type)
-            walk_forward_checked = bool(
-                st.checkbox(
-                    "Use Walk-Forward Validation",
-                    help=(
-                        WALK_FORWARD_HELP_DISABLED
-                        if auto_select_tickers
-                        else WALK_FORWARD_HELP_ENABLED
-                    ),
-                    disabled=auto_select_tickers,
-                )
+            walk_forward_checked = st.checkbox(
+                "Use Walk-Forward Validation",
+                help=(
+                    WALK_FORWARD_HELP_DISABLED
+                    if auto_select_tickers
+                    else WALK_FORWARD_HELP_ENABLED
+                ),
+                disabled=auto_select_tickers,
             )
             walk_forward = False if auto_select_tickers else walk_forward_checked
         else:
@@ -181,7 +173,7 @@ def get_sidebar_inputs() -> tuple[BacktestConfig, bool]:
         initial_capital, transaction_cost_bps, slippage_bps = get_trading_assumptions(
             container=st
         )
-        submitted = bool(st.form_submit_button("Run Backtest"))
+        submitted = st.form_submit_button("Run Backtest")
 
     config = BacktestConfig(
         ticker=ticker,
@@ -208,9 +200,7 @@ def get_user_inputs_except_strategy_params() -> tuple[
         A tuple containing the ticker symbol(s), start date, end date, strategy
         type, and whether to use automatic ticker selection.
     """
-    strategy_type = str(
-        st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
-    )
+    strategy_type = st.sidebar.selectbox("Strategy Type", TRADING_STRATEGIES, index=0)
     auto_select_tickers = _render_auto_select_checkbox(strategy_type)
     ticker = _render_ticker_inputs(
         strategy_type,
@@ -285,12 +275,13 @@ def get_fixed_params(strategy_type: str, container: Any = None) -> dict[str, Any
             short_window = target.slider(
                 "Short Window (Days)", min_value=5, max_value=50, value=20
             )
-            long_window_min = max(20, short_window + 1)
+            # Keep bounds static so Streamlit does not reset the slider inside
+            # st.form when short_window changes; app.py validates on submit.
             long_window = target.slider(
                 "Long Window (Days)",
-                min_value=long_window_min,
+                min_value=20,
                 max_value=200,
-                value=max(50, long_window_min),
+                value=50,
             )
             return {"short_window": short_window, "long_window": long_window}
         case "Mean Reversion":
@@ -308,12 +299,13 @@ def get_fixed_params(strategy_type: str, container: Any = None) -> dict[str, Any
             entry_z_score = target.slider(
                 "Entry Z-Score", min_value=1.0, max_value=3.0, value=2.0, step=0.1
             )
-            exit_z_score_max = min(1.5, round(entry_z_score - 0.1, 1))
+            # Keep bounds static so Streamlit does not reset the slider inside
+            # st.form when entry_z_score changes; app.py validates on submit.
             exit_z_score = target.slider(
                 "Exit Z-Score",
                 min_value=0.1,
-                max_value=exit_z_score_max,
-                value=min(0.5, exit_z_score_max),
+                max_value=1.5,
+                value=0.5,
                 step=0.1,
             )
             return {

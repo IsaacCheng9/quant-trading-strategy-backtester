@@ -600,7 +600,16 @@ class Backtester:
         if metrics is None:
             raise ValueError("Backtest produced no performance metrics.")
 
-        strategy_params = self.strategy.get_parameters()
+        strategy_params = dict(self.strategy.get_parameters())
+        # Include non-default trading assumptions so persistence deduplication
+        # distinguishes runs with different capital, fees, or slippage while
+        # remaining backward-compatible with existing default records.
+        if self.initial_capital != DEFAULT_INITIAL_CAPITAL:
+            strategy_params["initial_capital"] = self.initial_capital
+        if self.transaction_cost_bps != DEFAULT_TRANSACTION_COST_BPS:
+            strategy_params["transaction_cost_bps"] = self.transaction_cost_bps
+        if self.slippage_bps != DEFAULT_SLIPPAGE_BPS:
+            strategy_params["slippage_bps"] = self.slippage_bps
         strategy_name = self.strategy.__class__.__name__
 
         start_date_row = self.data.select(

@@ -38,6 +38,7 @@ from quant_trading_strategy_backtester.data import (
 from quant_trading_strategy_backtester.optimiser import (
     WALK_FORWARD_FOLDS,
     ProgressCallback,
+    _first_valid_parameter_combination,
     create_strategy,
     evaluate_validation_period,
     get_training_data,
@@ -454,6 +455,11 @@ def _display_benchmark_comparison(
         benchmark_start_date, benchmark_end_date = _get_benchmark_date_range(
             backtest_data, prior_date=prior_date
         )
+        if benchmark_start_date >= benchmark_end_date:
+            st.warning(
+                "Benchmark comparison unavailable: requires at least two trading days."
+            )
+            return
         benchmark_data = _cached_load_yfinance_data_one_ticker(
             BENCHMARK_TICKER, benchmark_start_date, benchmark_end_date
         )
@@ -646,10 +652,7 @@ def prepare_single_ticker_strategy_with_optimisation(
             slippage_bps=slippage_bps,
         )
     else:
-        best_params = {
-            k: v[0] if isinstance(v, (list, range)) else v
-            for k, v in strategy_params.items()
-        }
+        best_params = _first_valid_parameter_combination(strategy_type, strategy_params)
 
     # Calculate and display the time taken for optimisation.
     end_time = time.time()
