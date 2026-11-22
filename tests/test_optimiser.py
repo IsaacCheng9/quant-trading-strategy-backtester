@@ -2555,7 +2555,7 @@ def test_evaluate_validation_period_reconciles_pairs_fold_transition() -> None:
     slip_bps = 5.0
     cost_rate = (tx_bps + slip_bps) / 10_000
 
-    # Fold 1 (bars 12..19) ends LONG (+1.0) with window=5 entry-locked weights.
+    # Fold 1 (bars 12..19) ends SHORT (-1.0) with window=5 entry-locked weights.
     fold_1_params = {"window": 5, "entry_z_score": 1.0, "exit_z_score": 0.2}
     fold_1_results, _ = evaluate_validation_period(
         data[:20],
@@ -2566,16 +2566,16 @@ def test_evaluate_validation_period_reconciles_pairs_fold_transition() -> None:
         transaction_cost_bps=tx_bps,
         slippage_bps=slip_bps,
     )
-    assert fold_1_results["signal"][-1] == pytest.approx(1.0)
+    assert fold_1_results["signal"][-1] == pytest.approx(-1.0)
     prior_w1 = float(fold_1_results["leg_1_weight"][-1])
     prior_w2 = float(fold_1_results["leg_2_weight"][-1])
-    assert prior_w1 > 0.0
-    assert prior_w2 < 0.0
+    assert prior_w1 < 0.0
+    assert prior_w2 > 0.0
 
-    # Fold 2 (bars 20..23) uses window=8, which is also LONG (+1.0) on bar 20
+    # Fold 2 (bars 20..23) uses window=7, which is also SHORT (-1.0) on bar 20
     # but with different entry-locked leg weights (and zero unreconciled
-    # turnover because window=8 was already LONG on bar 19).
-    fold_2_params = {"window": 8, "entry_z_score": 1.0, "exit_z_score": 0.2}
+    # turnover because window=7 was already SHORT on bar 19).
+    fold_2_params = {"window": 7, "entry_z_score": 1.0, "exit_z_score": 0.2}
     unreconciled_results, _ = evaluate_validation_period(
         data,
         data[20:],
@@ -2606,7 +2606,7 @@ def test_evaluate_validation_period_reconciles_pairs_fold_transition() -> None:
     target_sig = float(fold_2_results["signal"][0])
     target_w1 = float(fold_2_results["leg_1_weight"][0])
     target_w2 = float(fold_2_results["leg_2_weight"][0])
-    assert target_sig == pytest.approx(1.0)
+    assert target_sig == pytest.approx(-1.0)
     assert not math.isclose(target_w1, prior_w1, rel_tol=1e-9, abs_tol=1e-9)
 
     a1_ret = (data["Close_1"][20] - data["Close_1"][19]) / data["Close_1"][19]
@@ -2646,8 +2646,8 @@ def test_evaluate_validation_period_reconciles_pairs_fold_transition() -> None:
     assert rebalance_rows["Turnover"][0] == pytest.approx(expected_turnover)
     assert rebalance_rows["Transaction Costs"][0] == pytest.approx(expected_cost)
 
-    # Verify a signal flip across the boundary (SHORT prior -> LONG target).
-    flip_prior = PortfolioPosition(signal=-1.0, leg_1_weight=-0.6, leg_2_weight=0.4)
+    # Verify a signal flip across the boundary (LONG prior -> SHORT target).
+    flip_prior = PortfolioPosition(signal=1.0, leg_1_weight=0.6, leg_2_weight=-0.4)
     flip_results, _ = evaluate_validation_period(
         data,
         data[20:],
@@ -2658,14 +2658,14 @@ def test_evaluate_validation_period_reconciles_pairs_fold_transition() -> None:
         slippage_bps=slip_bps,
         prior_position=flip_prior,
     )
-    flip_gross = -0.6 * a1_ret + 0.4 * a2_ret
-    flip_l1_change = target_w1 - (-0.6)
-    flip_l2_change = target_w2 - 0.4
+    flip_gross = 0.6 * a1_ret - 0.4 * a2_ret
+    flip_l1_change = target_w1 - 0.6
+    flip_l2_change = target_w2 - (-0.4)
     flip_turnover = abs(flip_l1_change) + abs(flip_l2_change)
     flip_cost = flip_turnover * cost_rate
 
     assert flip_results["gross_strategy_returns"][0] == pytest.approx(flip_gross)
-    assert flip_results["position_change"][0] == pytest.approx(2.0)
+    assert flip_results["position_change"][0] == pytest.approx(-2.0)
     assert flip_results["leg_1_weight_change"][0] == pytest.approx(flip_l1_change)
     assert flip_results["leg_2_weight_change"][0] == pytest.approx(flip_l2_change)
     assert flip_results["trade_turnover"][0] == pytest.approx(flip_turnover)
