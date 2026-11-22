@@ -502,15 +502,13 @@ def _reset_cumulative_result_columns(
     results: pl.DataFrame, initial_capital: float
 ) -> pl.DataFrame:
     """Reset cumulative returns and costs from the first validation row."""
+    gross_growth = (1 + pl.col("gross_strategy_returns")).clip(lower_bound=0.0)
+    net_growth = (1 + pl.col("strategy_returns")).clip(lower_bound=0.0)
     return results.with_columns(
         [
-            (1 + pl.col("gross_strategy_returns"))
-            .cum_prod()
-            .alias("gross_cumulative_returns"),
-            (1 + pl.col("strategy_returns")).cum_prod().alias("cumulative_returns"),
-            (initial_capital * (1 + pl.col("strategy_returns")).cum_prod()).alias(
-                "equity_curve"
-            ),
+            gross_growth.cum_prod().alias("gross_cumulative_returns"),
+            net_growth.cum_prod().alias("cumulative_returns"),
+            (initial_capital * net_growth.cum_prod()).alias("equity_curve"),
             pl.col("transaction_costs").cum_sum().alias("cumulative_transaction_costs"),
         ]
     )

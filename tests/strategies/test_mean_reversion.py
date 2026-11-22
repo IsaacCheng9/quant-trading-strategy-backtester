@@ -149,3 +149,77 @@ def test_mean_reversion_empty_data_uses_mean_reversion_schema() -> None:
         "signal": pl.Float64,
         "position_change": pl.Float64,
     }
+
+
+@pytest.mark.parametrize("bad_price", [0.0, -5.0])
+def test_mean_reversion_flattens_and_blocks_non_positive_prices(
+    bad_price: float,
+) -> None:
+    """Verify zero or negative prices flatten open trades and block entry."""
+    start_date = date(2023, 1, 1)
+    # Row 5 enters long (80 < lower_band), row 6 hits bad_price and must exit
+    # to flat, and row 7 hits bad_price again while flat and must stay flat.
+    prices = [100.0, 100.0, 100.0, 100.0, 100.0, 80.0, bad_price, bad_price]
+    dates = [start_date + timedelta(days=i) for i in range(len(prices))]
+    data = pl.DataFrame({"Date": dates, "Close": prices})
+
+    strategy = MeanReversionStrategy({"window": 5, "std_dev": 1.0})
+    signals = strategy.generate_signals(data)
+
+    assert signals["signal"].to_list() == [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+    assert signals["position_change"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        -1.0,
+        0.0,
+    ]
+
+
+def test_mean_reversion_flips_directly_long_to_short_on_band_gap() -> None:
+    """Verify a gap above the upper band flips an open long to short."""
+    start_date = date(2023, 1, 1)
+    prices = [100.0, 100.0, 100.0, 100.0, 100.0, 80.0, 140.0]
+    dates = [start_date + timedelta(days=i) for i in range(len(prices))]
+    data = pl.DataFrame({"Date": dates, "Close": prices})
+
+    strategy = MeanReversionStrategy({"window": 5, "std_dev": 1.0})
+    signals = strategy.generate_signals(data)
+
+    assert signals["Close"][6] > signals["upper_band"][6]
+    assert signals["signal"].to_list() == [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, -1.0]
+    assert signals["position_change"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        -2.0,
+    ]
+
+
+def test_mean_reversion_flips_directly_short_to_long_on_band_gap() -> None:
+    """Verify a gap below the lower band flips an open short to long."""
+    start_date = date(2023, 1, 1)
+    prices = [100.0, 100.0, 100.0, 100.0, 100.0, 120.0, 60.0]
+    dates = [start_date + timedelta(days=i) for i in range(len(prices))]
+    data = pl.DataFrame({"Date": dates, "Close": prices})
+
+    strategy = MeanReversionStrategy({"window": 5, "std_dev": 1.0})
+    signals = strategy.generate_signals(data)
+
+    assert signals["Close"][6] < signals["lower_band"][6]
+    assert signals["signal"].to_list() == [0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 1.0]
+    assert signals["position_change"].to_list() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0,
+        2.0,
+    ]

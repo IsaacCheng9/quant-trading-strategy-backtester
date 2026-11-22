@@ -39,17 +39,20 @@ class MeanReversionStrategy(BaseStrategy):
         self.std_dev = float(params["std_dev"])
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Generates trading signals for the given data.
+        """Generate trading signals for the given price data.
 
-        Generates a buy signal (1) when the price falls below the lower band,
-        and generates a sell signal (-1) when the price rises above the upper
-        band. Positions are held until the price crosses back through the
-        rolling mean.
+        Requires a finite positive close price and positive rolling standard
+        deviation; invalid rows exit to flat (0). Enters long (1) when the
+        price falls below the lower band and short (-1) when it rises above
+        the upper band. Open long positions flip directly to short (-1) on a
+        gap above the upper band and otherwise exit to flat (0) at or above
+        the rolling mean; open short positions flip directly to long (1) on a
+        gap below the lower band and otherwise exit to flat (0) at or below
+        the rolling mean.
 
         Args:
             data: A DataFrame containing the price data. Must have a 'Close'
-                  column.
+                column.
 
         Returns:
             A DataFrame containing the generated trading signals. Columns
@@ -132,9 +135,19 @@ class MeanReversionStrategy(BaseStrategy):
                 lower_band_value = float(lower_band)
 
                 if signal > 0:
-                    signal = 0.0 if close_value >= mean_value else 1.0
+                    if close_value > upper_band_value:
+                        signal = -1.0
+                    elif close_value >= mean_value:
+                        signal = 0.0
+                    else:
+                        signal = 1.0
                 elif signal < 0:
-                    signal = 0.0 if close_value <= mean_value else -1.0
+                    if close_value < lower_band_value:
+                        signal = 1.0
+                    elif close_value <= mean_value:
+                        signal = 0.0
+                    else:
+                        signal = -1.0
                 elif close_value < lower_band_value:
                     signal = 1.0
                 elif close_value > upper_band_value:
@@ -152,14 +165,16 @@ class MeanReversionStrategy(BaseStrategy):
         upper_band: Any,
         lower_band: Any,
     ) -> bool:
-        """Return whether the row has a tradable rolling band."""
+        """Return whether the row has a positive price and tradable band."""
         return (
             MeanReversionStrategy._is_finite_number(close)
+            and float(close) > 0.0
             and MeanReversionStrategy._is_finite_number(mean)
             and MeanReversionStrategy._is_finite_number(std)
             and MeanReversionStrategy._is_finite_number(upper_band)
             and MeanReversionStrategy._is_finite_number(lower_band)
-            and float(std) > 0
+            and float(std) > 0.0
+            and float(upper_band) > float(lower_band)
         )
 
     @staticmethod

@@ -73,11 +73,8 @@ def calculate_benchmark_relative_metrics(
     aligned_returns = (
         strategy_returns_data.join(benchmark_returns, on="Date", how="inner")
         .filter(
-            (
-                pl.col("strategy_previous_date").is_null()
-                & pl.col("benchmark_previous_date").is_null()
-            )
-            | (pl.col("strategy_previous_date") == pl.col("benchmark_previous_date"))
+            pl.col("strategy_previous_date").is_not_null()
+            & (pl.col("strategy_previous_date") == pl.col("benchmark_previous_date"))
         )
         .drop_nulls(["strategy_returns", "benchmark_returns"])
         .sort("Date")
@@ -97,13 +94,23 @@ def calculate_benchmark_relative_metrics(
     if len(strategy_returns) < 2:
         return _undefined_metrics(len(strategy_returns))
 
-    strategy_total_return = float(np.prod(1 + strategy_returns) - 1)
-    benchmark_total_return = float(np.prod(1 + benchmark_returns_array) - 1)
+    # Absorb bankruptcy at 0 equity so wipeout returns cannot flip sign or
+    # accrue phantom post-bankruptcy gains in aligned metrics.
+    strategy_growth = np.cumprod(np.maximum(1.0 + strategy_returns, 0.0))
+    prior_alive = np.concatenate(([True], strategy_growth[:-1] > 0.0))
+    effective_strategy_returns = np.where(
+        prior_alive, np.maximum(strategy_returns, -1.0), 0.0
+    )
+
+    strategy_total_return = float(strategy_growth[-1] - 1.0)
+    benchmark_total_return = float(
+        np.prod(np.maximum(1.0 + benchmark_returns_array, 0.0)) - 1.0
+    )
     excess_return = strategy_total_return - benchmark_total_return
 
     periods = TRADING_DAYS_PER_YEAR
     rf_daily = (1 + risk_free_return_rate_annual) ** (1 / periods) - 1
-    strategy_excess_returns = strategy_returns - rf_daily
+    strategy_excess_returns = effective_strategy_returns - rf_daily
     benchmark_excess_returns = benchmark_returns_array - rf_daily
 
     beta = _calculate_beta(strategy_excess_returns, benchmark_excess_returns)
@@ -119,7 +126,7 @@ def calculate_benchmark_relative_metrics(
         else float("nan")
     )
     information_ratio = _calculate_information_ratio(
-        strategy_returns - benchmark_returns_array
+        effective_strategy_returns - benchmark_returns_array
     )
 
     return {

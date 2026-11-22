@@ -537,13 +537,14 @@ def test_backtester_reports_downside_and_drawdown_risk_metrics() -> None:
     metrics = backtester.get_performance_metrics()
     assert metrics is not None
 
+    risk_returns = strategy_returns[1:]
     downside_deviation = math.sqrt(
-        sum(min(return_value, 0.0) ** 2 for return_value in strategy_returns)
-        / len(strategy_returns)
+        sum(min(return_value, 0.0) ** 2 for return_value in risk_returns)
+        / len(risk_returns)
     )
     expected_sortino = (
         (TRADING_DAYS_PER_YEAR**0.5)
-        * (sum(strategy_returns) / len(strategy_returns))
+        * (sum(risk_returns) / len(risk_returns))
         / downside_deviation
     )
     expected_calmar = (
@@ -946,3 +947,157 @@ def test_save_results_persists_distinct_trading_assumptions(
             "transaction_cost_bps": 15.0,
             "slippage_bps": 7.5,
         } in saved_params
+
+
+def test_get_performance_metrics_excludes_cold_start_row_from_risk_ratios() -> None:
+    """Verify cold-start row 0 is excluded from Sharpe and Sortino only."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(5)]
+    data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close": [100.0, 110.0, 99.0, 108.9, 103.455],
+        }
+    )
+    backtester = Backtester(
+        data,
+        BuyAndHoldStrategy({}),
+        initial_capital=100_000.0,
+        transaction_cost_bps=50.0,
+        slippage_bps=0.0,
+    )
+    results = backtester.run()
+
+    cold_metrics = backtester.get_performance_metrics(include_initial_period=False)
+    validation_metrics = backtester.get_performance_metrics(include_initial_period=True)
+    assert cold_metrics is not None
+    assert validation_metrics is not None
+
+    all_returns = [float(val) for val in results["strategy_returns"].to_list()]
+    active_returns = all_returns[1:]
+
+    def _expected_sharpe(values: list[float]) -> float:
+        mean_val = sum(values) / len(values)
+        var_val = sum((v - mean_val) ** 2 for v in values) / (len(values) - 1)
+        return (TRADING_DAYS_PER_YEAR**0.5) * mean_val / math.sqrt(var_val)
+
+    def _expected_sortino(values: list[float]) -> float:
+        mean_val = sum(values) / len(values)
+        downside = math.sqrt(sum(min(v, 0.0) ** 2 for v in values) / len(values))
+        return (TRADING_DAYS_PER_YEAR**0.5) * mean_val / downside
+
+    assert cold_metrics["Sharpe Ratio"] == pytest.approx(
+        _expected_sharpe(active_returns)
+    )
+    assert cold_metrics["Sortino Ratio"] == pytest.approx(
+        _expected_sortino(active_returns)
+    )
+    assert validation_metrics["Sharpe Ratio"] == pytest.approx(
+        _expected_sharpe(all_returns)
+    )
+    assert validation_metrics["Sortino Ratio"] == pytest.approx(
+        _expected_sortino(all_returns)
+    )
+    assert cold_metrics["Sharpe Ratio"] != pytest.approx(
+        validation_metrics["Sharpe Ratio"]
+    )
+    assert cold_metrics["Sortino Ratio"] != pytest.approx(
+        validation_metrics["Sortino Ratio"]
+    )
+
+    # Row-0 entry cost and turnover still count in return, cost, and drawdown.
+    for key in (
+        "Total Return",
+        "Gross Total Return",
+        "Total Costs",
+        "Trade Events",
+        "Total Turnover",
+        "Max Drawdown",
+    ):
+        assert cold_metrics[key] == pytest.approx(validation_metrics[key])
+    assert cold_metrics["Total Costs"] == pytest.approx(0.005)
+    assert cold_metrics["Trade Events"] == 1.0
+    assert cold_metrics["Total Turnover"] == 1.0
+
+    # A single cold-start row produces NaN risk ratios when row 0 is dropped.
+    single_row_bt = Backtester(
+        data.head(1),
+        BuyAndHoldStrategy({}),
+        transaction_cost_bps=50.0,
+        slippage_bps=0.0,
+    )
+    single_row_bt.run()
+    single_metrics = single_row_bt.get_performance_metrics(include_initial_period=False)
+    assert single_metrics is not None
+    assert math.isnan(single_metrics["Sharpe Ratio"])
+    assert math.isnan(single_metrics["Sortino Ratio"])
+
+
+def test_backtester_clamps_bankrupt_equity_at_zero() -> None:
+    """Verify >100% single-day loss absorbs cumulative equity at zero."""
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(5)]
+    # Short entry on day 1; day 2 jumps +150% (-150% short loss), followed by
+    # -20% and +50% moves that must not revive bankrupt equity.
+    data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close": [100.0, 100.0, 250.0, 200.0, 300.0],
+        }
+    )
+    strategy = MockHoldingStrategy({"signals": [0.0, -1.0, -1.0, -1.0, -1.0]})
+    backtester = Backtester(
+        data,
+        strategy,
+        initial_capital=100_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+
+    results = backtester.run()
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    assert results["gross_cumulative_returns"].to_list() == pytest.approx(
+        [1.0, 1.0, 0.0, 0.0, 0.0]
+    )
+    assert results["cumulative_returns"].to_list() == pytest.approx(
+        [1.0, 1.0, 0.0, 0.0, 0.0]
+    )
+    assert results["equity_curve"].to_list() == pytest.approx(
+        [100_000.0, 100_000.0, 0.0, 0.0, 0.0]
+    )
+    assert (results["equity_curve"] >= 0.0).all()
+    assert metrics["Total Return"] == pytest.approx(-1.0)
+    assert metrics["Gross Total Return"] == pytest.approx(-1.0)
+    assert metrics["Max Drawdown"] == pytest.approx(-1.0)
+    assert math.isnan(metrics["Calmar Ratio"])
+
+
+def test_bankrupt_strategy_cannot_score_positive_sharpe_or_sortino() -> None:
+    """Verify post-bankruptcy bars do not yield positive Sharpe or Sortino."""
+    n_post_days = 20
+    # Day 0: flat at 100; day 1: short at 100; day 2: jumps to 250 (-150%
+    # wipeout); days 3..22: price drops 10% per day (+10% raw short returns).
+    closes = [100.0, 100.0, 250.0]
+    for _ in range(n_post_days):
+        closes.append(closes[-1] * 0.9)
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i)
+        for i in range(len(closes))
+    ]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+    signals = [0.0] + [-1.0] * (len(closes) - 1)
+    backtester = Backtester(
+        data,
+        MockHoldingStrategy({"signals": signals}),
+        initial_capital=100_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+
+    backtester.run()
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    assert metrics["Total Return"] == pytest.approx(-1.0)
+    assert metrics["Sharpe Ratio"] < 0.0
+    assert metrics["Sortino Ratio"] < 0.0
