@@ -1,9 +1,6 @@
-"""
-Implements a pairs trading strategy for two correlated financial instruments,
-which is based on the assumption that the historical relationship between two
-assets will continue.
-"""
+"""Implement a pairs trading strategy for two correlated financial assets."""
 
+import math
 from typing import Any
 
 import polars as pl
@@ -15,13 +12,11 @@ from quant_trading_strategy_backtester.strategy_params import (
 
 
 class PairsTradingStrategy(BaseStrategy):
-    """
-    Implements a pairs trading strategy for two correlated financial
-    instruments, which is based on the assumption that the historical
-    relationship between two assets will continue. This is a market-neutral
-    strategy that exploits temporary mispricings in this relationship. It
-    estimates a rolling hedge ratio, calculates a hedge-ratio-adjusted spread,
-    and uses z-scores to determine when to enter and exit positions.
+    """Implement a market-neutral pairs trading strategy for two assets.
+
+    This strategy estimates a positive rolling OLS hedge ratio, calculates the
+    hedge-ratio-adjusted spread, and uses spread z-scores to enter, exit, or
+    flip positions while locking leg weights at entry or flip.
 
     Attributes:
         params: A dictionary containing the strategy parameters.
@@ -30,36 +25,36 @@ class PairsTradingStrategy(BaseStrategy):
     def __init__(self, params: dict[str, Any]):
         validate_strategy_params("Pairs Trading", params)
         super().__init__(params)
-        # The lookback period for calculating the rolling mean and standard
-        # deviation of the spread.
+        # Lookback period for the rolling hedge ratio and spread statistics.
         self.window = int(params["window"])
-        # The score threshold for entering a trade.
+        # Z-score threshold for entering or flipping a trade.
         self.entry_z_score = float(params["entry_z_score"])
-        # The z-score threshold for exiting a trade.
+        # Z-score threshold for exiting an open trade.
         self.exit_z_score = float(params["exit_z_score"])
 
     def generate_signals(self, data: pl.DataFrame) -> pl.DataFrame:
-        """
-        Generates trading signals based on the pairs trading strategy.
+        """Generate trading signals based on the pairs trading strategy.
 
         Calculates the rolling hedge ratio and spread between two assets,
-        computes the z-score of the spread, and generates trading signals based
-        on the entry and exit z-score thresholds.
+        computes the z-score of the spread, and generates stateful signals and
+        entry-locked leg weights using the entry and exit thresholds.
 
         Trading Logic:
-            - When z-score > entry_z_score:
-                - Short asset 1, long the hedge-ratio-weighted asset 2
-                  (signal = -1)
-            - When z-score < -entry_z_score:
-                - Long asset 1, short the hedge-ratio-weighted asset 2
-                  (signal = 1)
-            - When |z-score| < exit_z_score:
-                - Close positions (signal = 0)
+            - Requires a finite positive rolling hedge ratio and positive
+              spread standard deviation; invalid rows exit to flat.
+            - Flat to short (-1) when z-score > entry_z_score; flat to long
+              (1) when z-score < -entry_z_score.
+            - Long flips to short (-1) when z-score > entry_z_score and exits
+              to flat (0) when z-score >= -exit_z_score.
+            - Short flips to long (1) when z-score < -entry_z_score and exits
+              to flat (0) when z-score <= exit_z_score.
+            - Leg weights are normalised by gross notional on entry or flip
+              and held constant until the signal changes.
 
         Args:
             data: A DataFrame containing the price data. Must have 'Close_1'
-                  and 'Close_2' columns representing the closing prices of the
-                  two assets.
+                and 'Close_2' columns representing the closing prices of the
+                two assets.
 
         Returns:
             A DataFrame containing the generated trading signals.
@@ -68,9 +63,11 @@ class PairsTradingStrategy(BaseStrategy):
             - 'spread': The hedge-ratio-adjusted spread between the two assets.
             - 'z_score': The standardised score of the spread.
             - 'signal': The trading signal (-1, 0, or 1).
-            - 'leg_1_weight' and 'leg_2_weight': The normalised position
-              weights for each leg.
-            - 'position_change': The change in position from the previous period.
+            - 'leg_1_weight' and 'leg_2_weight': The entry-locked normalised
+              position weights for each leg.
+            - 'leg_1_weight_change' and 'leg_2_weight_change': Period changes
+              in each leg weight from a flat starting position.
+            - 'position_change': The change in signal from the previous period.
         """
         if data.is_empty():
             return pl.DataFrame(
@@ -95,16 +92,22 @@ class PairsTradingStrategy(BaseStrategy):
             raise ValueError("Data must contain 'Close_1' and 'Close_2' columns")
 
         hedge_ratio_is_valid = (
-            pl.col("hedge_ratio").is_not_null() & pl.col("hedge_ratio").is_finite()
+            pl.col("hedge_ratio").is_not_null()
+            & pl.col("hedge_ratio").is_finite()
+            & (pl.col("hedge_ratio") > 0)
         )
         valid_spread_band = (
             hedge_ratio_is_valid
+            & pl.col("spread").is_not_null()
+            & pl.col("spread").is_finite()
+            & pl.col("spread_mean").is_not_null()
+            & pl.col("spread_mean").is_finite()
             & pl.col("spread_std").is_not_null()
             & pl.col("spread_std").is_finite()
             & (pl.col("spread_std") > 0)
         )
 
-        signals: pl.DataFrame = (
+        indicators: pl.DataFrame = (
             data.select(
                 [
                     pl.col("Date"),
@@ -163,7 +166,7 @@ class PairsTradingStrategy(BaseStrategy):
                     .alias("spread_std"),
                 ]
             )
-            # Calculate z-score, avoiding division by zero.
+            # Calculate z-score, avoiding division by zero and non-positive beta.
             .with_columns(
                 [
                     pl.when(valid_spread_band)
@@ -171,109 +174,178 @@ class PairsTradingStrategy(BaseStrategy):
                         (pl.col("spread") - pl.col("spread_mean"))
                         / pl.col("spread_std")
                     )
-                    .otherwise(0)
+                    .otherwise(0.0)
                     .alias("z_score")
                 ]
             )
-            # Generate trading signals.
-            .with_columns(
-                [
-                    pl.when(~valid_spread_band)
-                    .then(0)
-                    .when(valid_spread_band & (pl.col("z_score") > self.entry_z_score))
-                    .then(-1)
-                    .when(valid_spread_band & (pl.col("z_score") < -self.entry_z_score))
-                    .then(1)
-                    .when(
-                        valid_spread_band
-                        & (pl.col("z_score").abs() < self.exit_z_score)
-                    )
-                    .then(0)
-                    .otherwise(None)
-                    .alias("signal")
-                ]
-            )
-            # Fill forward the signal.
-            .with_columns(
-                [pl.col("signal").forward_fill().fill_null(0).alias("signal")]
-            )
-            # Convert hedge quantities into gross-dollar portfolio weights.
-            .with_columns(
-                [
-                    pl.col("Close_1").abs().alias("leg_1_notional"),
-                    (pl.col("hedge_ratio") * pl.col("Close_2"))
-                    .abs()
-                    .alias("leg_2_notional"),
-                ]
-            )
-            .with_columns(
-                [
-                    (pl.col("leg_1_notional") + pl.col("leg_2_notional")).alias(
-                        "gross_notional"
-                    )
-                ]
-            )
-            .with_columns(
-                [
-                    pl.when(
-                        hedge_ratio_is_valid
-                        & pl.col("gross_notional").is_finite()
-                        & (pl.col("gross_notional") > 0)
-                        & (pl.col("signal") != 0)
-                    )
-                    .then(
-                        pl.col("signal")
-                        * pl.col("leg_1_notional")
-                        / pl.col("gross_notional")
-                    )
-                    .otherwise(0.0)
-                    .alias("leg_1_weight"),
-                    pl.when(
-                        hedge_ratio_is_valid
-                        & pl.col("gross_notional").is_finite()
-                        & (pl.col("gross_notional") > 0)
-                        & (pl.col("signal") != 0)
-                    )
-                    .then(
-                        -pl.col("signal")
-                        * pl.col("hedge_ratio")
-                        * pl.col("Close_2")
-                        / pl.col("gross_notional")
-                    )
-                    .otherwise(0.0)
-                    .alias("leg_2_weight"),
-                ]
-            )
-            # Calculate position and leg-weight changes.
-            .with_columns(
-                [
-                    pl.col("signal").diff().fill_null(0).alias("position_change"),
-                    pl.col("leg_1_weight")
-                    .diff()
-                    .fill_null(pl.col("leg_1_weight"))
-                    .alias("leg_1_weight_change"),
-                    pl.col("leg_2_weight")
-                    .diff()
-                    .fill_null(pl.col("leg_2_weight"))
-                    .alias("leg_2_weight_change"),
-                ]
-            )
-            .drop(
-                [
-                    "close_2_variance",
-                    "close_covariance",
-                    "leg_1_notional",
-                    "leg_2_notional",
-                    "gross_notional",
-                ]
-            )
-            .with_columns(
-                [
-                    pl.col("signal").cast(pl.Float64),
-                    pl.col("position_change").cast(pl.Float64),
-                ]
-            )
+            .drop(["close_2_variance", "close_covariance"])
             .collect()
         )
 
-        return signals
+        signal_values, leg_1_weights, leg_2_weights = self._generate_stateful_signals(
+            indicators
+        )
+        position_changes = self._calculate_changes(signal_values)
+        leg_1_weight_changes = self._calculate_changes(leg_1_weights)
+        leg_2_weight_changes = self._calculate_changes(leg_2_weights)
+
+        return indicators.with_columns(
+            [
+                pl.Series("signal", signal_values, dtype=pl.Float64),
+                pl.Series("leg_1_weight", leg_1_weights, dtype=pl.Float64),
+                pl.Series("leg_2_weight", leg_2_weights, dtype=pl.Float64),
+                pl.Series(
+                    "leg_1_weight_change",
+                    leg_1_weight_changes,
+                    dtype=pl.Float64,
+                ),
+                pl.Series(
+                    "leg_2_weight_change",
+                    leg_2_weight_changes,
+                    dtype=pl.Float64,
+                ),
+                pl.Series("position_change", position_changes, dtype=pl.Float64),
+            ]
+        )
+
+    def _generate_stateful_signals(
+        self, indicators: pl.DataFrame
+    ) -> tuple[list[float], list[float], list[float]]:
+        """Generate stateful pair signals and entry-locked leg weights."""
+        signal = 0.0
+        leg_1_weight = 0.0
+        leg_2_weight = 0.0
+
+        signals: list[float] = []
+        leg_1_weights: list[float] = []
+        leg_2_weights: list[float] = []
+
+        for (
+            close_1,
+            close_2,
+            hedge_ratio,
+            spread,
+            spread_mean,
+            spread_std,
+            z_score,
+        ) in indicators.select(
+            [
+                "Close_1",
+                "Close_2",
+                "hedge_ratio",
+                "spread",
+                "spread_mean",
+                "spread_std",
+                "z_score",
+            ]
+        ).iter_rows():
+            if not self._has_valid_row(
+                close_1,
+                close_2,
+                hedge_ratio,
+                spread,
+                spread_mean,
+                spread_std,
+                z_score,
+            ):
+                signal = 0.0
+                leg_1_weight = 0.0
+                leg_2_weight = 0.0
+            else:
+                close_1_val = float(close_1)
+                close_2_val = float(close_2)
+                hedge_ratio_val = float(hedge_ratio)
+                z_score_val = float(z_score)
+
+                leg_1_notional = abs(close_1_val)
+                leg_2_notional = abs(hedge_ratio_val * close_2_val)
+                gross_notional = leg_1_notional + leg_2_notional
+
+                if not math.isfinite(gross_notional) or gross_notional <= 0.0:
+                    signal = 0.0
+                    leg_1_weight = 0.0
+                    leg_2_weight = 0.0
+                else:
+                    new_signal = self._next_signal(signal, z_score_val)
+                    if new_signal == 0.0:
+                        leg_1_weight = 0.0
+                        leg_2_weight = 0.0
+                    elif new_signal != signal:
+                        leg_1_weight = new_signal * leg_1_notional / gross_notional
+                        leg_2_weight = (
+                            -new_signal * hedge_ratio_val * close_2_val / gross_notional
+                        )
+                    signal = new_signal
+
+            signals.append(signal)
+            leg_1_weights.append(leg_1_weight)
+            leg_2_weights.append(leg_2_weight)
+
+        return signals, leg_1_weights, leg_2_weights
+
+    def _next_signal(self, current_signal: float, z_score: float) -> float:
+        """Return the next signal state from the current signal and z-score."""
+        if current_signal > 0.0:
+            if z_score > self.entry_z_score:
+                return -1.0
+            if z_score >= -self.exit_z_score:
+                return 0.0
+            return 1.0
+
+        if current_signal < 0.0:
+            if z_score < -self.entry_z_score:
+                return 1.0
+            if z_score <= self.exit_z_score:
+                return 0.0
+            return -1.0
+
+        if z_score > self.entry_z_score:
+            return -1.0
+        if z_score < -self.entry_z_score:
+            return 1.0
+        return 0.0
+
+    @staticmethod
+    def _has_valid_row(
+        close_1: Any,
+        close_2: Any,
+        hedge_ratio: Any,
+        spread: Any,
+        spread_mean: Any,
+        spread_std: Any,
+        z_score: Any,
+    ) -> bool:
+        """Return whether a row has valid prices, positive beta, and spread."""
+        return (
+            PairsTradingStrategy._is_finite_number(close_1)
+            and PairsTradingStrategy._is_finite_number(close_2)
+            and PairsTradingStrategy._is_finite_number(hedge_ratio)
+            and float(hedge_ratio) > 0.0
+            and PairsTradingStrategy._is_finite_number(spread)
+            and PairsTradingStrategy._is_finite_number(spread_mean)
+            and PairsTradingStrategy._is_finite_number(spread_std)
+            and float(spread_std) > 0.0
+            and PairsTradingStrategy._is_finite_number(z_score)
+        )
+
+    @staticmethod
+    def _is_finite_number(value: Any) -> bool:
+        """Return whether a value can be interpreted as a finite number."""
+        if value is None:
+            return False
+
+        try:
+            return math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _calculate_changes(values: list[float]) -> list[float]:
+        """Calculate step changes from a flat starting value."""
+        previous_value = 0.0
+        changes: list[float] = []
+        for value in values:
+            changes.append(value - previous_value)
+            previous_value = value
+
+        return changes
