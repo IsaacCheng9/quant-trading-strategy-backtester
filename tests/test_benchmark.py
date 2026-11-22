@@ -307,3 +307,33 @@ def test_calculate_benchmark_relative_metrics_excludes_cold_start_vs_prior_date(
     assert cold_metrics["Information Ratio"] != pytest.approx(
         validation_metrics["Information Ratio"]
     )
+
+
+def test_calculate_benchmark_relative_metrics_clamps_bankrupt_compounding() -> None:
+    """Verify bankrupt strategy returns clamp at -100% without sign flips."""
+    dates = [
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 2),
+        datetime.date(2020, 1, 3),
+        datetime.date(2020, 1, 4),
+    ]
+    # Two <-100% days would multiply to a positive factor without clamping.
+    strategy_results = pl.DataFrame(
+        {
+            "Date": dates,
+            "strategy_returns": [0.0, -1.5, 0.5, -1.5],
+        }
+    )
+    benchmark_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close": [100.0, 102.0, 104.04, 105.0804],
+        }
+    )
+
+    metrics = calculate_benchmark_relative_metrics(strategy_results, benchmark_data)
+
+    expected_benchmark = 105.0804 / 100.0 - 1.0
+    assert metrics["Strategy Aligned Total Return"] == pytest.approx(-1.0)
+    assert metrics["Benchmark Total Return"] == pytest.approx(expected_benchmark)
+    assert metrics["Excess Return"] == pytest.approx(-1.0 - expected_benchmark)

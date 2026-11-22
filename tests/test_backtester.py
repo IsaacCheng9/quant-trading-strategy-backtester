@@ -1070,3 +1070,34 @@ def test_backtester_clamps_bankrupt_equity_at_zero() -> None:
     assert metrics["Gross Total Return"] == pytest.approx(-1.0)
     assert metrics["Max Drawdown"] == pytest.approx(-1.0)
     assert math.isnan(metrics["Calmar Ratio"])
+
+
+def test_bankrupt_strategy_cannot_score_positive_sharpe_or_sortino() -> None:
+    """Verify post-bankruptcy bars do not yield positive Sharpe or Sortino."""
+    n_post_days = 20
+    # Day 0: flat at 100; day 1: short at 100; day 2: jumps to 250 (-150%
+    # wipeout); days 3..22: price drops 10% per day (+10% raw short returns).
+    closes = [100.0, 100.0, 250.0]
+    for _ in range(n_post_days):
+        closes.append(closes[-1] * 0.9)
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i)
+        for i in range(len(closes))
+    ]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+    signals = [0.0] + [-1.0] * (len(closes) - 1)
+    backtester = Backtester(
+        data,
+        MockHoldingStrategy({"signals": signals}),
+        initial_capital=100_000.0,
+        transaction_cost_bps=0.0,
+        slippage_bps=0.0,
+    )
+
+    backtester.run()
+    metrics = backtester.get_performance_metrics()
+    assert metrics is not None
+
+    assert metrics["Total Return"] == pytest.approx(-1.0)
+    assert metrics["Sharpe Ratio"] < 0.0
+    assert metrics["Sortino Ratio"] < 0.0

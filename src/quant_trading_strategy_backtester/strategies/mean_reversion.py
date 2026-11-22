@@ -174,6 +174,7 @@ class MeanReversionStrategy(BaseStrategy):
             and MeanReversionStrategy._is_finite_number(upper_band)
             and MeanReversionStrategy._is_finite_number(lower_band)
             and float(std) > 0.0
+            and float(upper_band) > float(lower_band)
         )
 
     @staticmethod

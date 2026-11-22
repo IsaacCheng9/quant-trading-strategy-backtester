@@ -336,18 +336,27 @@ def calculate_monthly_returns(results: pl.DataFrame) -> pl.DataFrame:
             }
         )
 
+    daily_factor = (1 + pl.col("strategy_returns").cast(pl.Float64)).clip(
+        lower_bound=0.0
+    )
     return (
         results.lazy()
         .sort("Date")
+        .with_columns(
+            daily_factor.alias("_daily_factor"),
+            daily_factor.cum_prod().alias("_cum_growth"),
+        )
+        .with_columns(
+            pl.when(pl.col("_cum_growth").shift(1, fill_value=1.0) > 0.0)
+            .then(pl.col("_daily_factor"))
+            .otherwise(1.0)
+            .alias("_effective_factor")
+        )
         .group_by(
             pl.col("Date").dt.strftime("%Y-%m").alias("Month (YYYY-MM)"),
             maintain_order=True,
         )
-        .agg(
-            (1 + pl.col("strategy_returns").cast(pl.Float64))
-            .product()
-            .alias("monthly_factor")
-        )
+        .agg(pl.col("_effective_factor").product().alias("monthly_factor"))
         .with_columns(
             [
                 ((pl.col("monthly_factor") - 1) * 100)

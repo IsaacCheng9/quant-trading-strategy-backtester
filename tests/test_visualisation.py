@@ -187,3 +187,27 @@ def test_display_returns_by_month_renders_calculated_table(
         pl.DataFrame(schema={"Date": pl.Date, "strategy_returns": pl.Float64})
     )
     assert captured["write"] == "No data available for monthly performance calculation."
+
+
+def test_calculate_monthly_returns_clamps_bankrupt_compounding() -> None:
+    """Verify bankruptcy clamps monthly and rolling returns without flips."""
+    results = pl.DataFrame(
+        {
+            "Date": [
+                datetime.date(2024, 1, 2),
+                datetime.date(2024, 1, 15),
+                datetime.date(2024, 1, 20),
+                datetime.date(2024, 2, 1),
+                datetime.date(2024, 3, 1),
+            ],
+            "strategy_returns": [0.05, -1.5, 0.2, 0.1, -1.5],
+        }
+    )
+
+    monthly = calculate_monthly_returns(results)
+
+    assert monthly["Month (YYYY-MM)"].to_list() == ["2024-01", "2024-02", "2024-03"]
+    assert monthly["Monthly Return (%)"].to_list() == pytest.approx([-100.0, 0.0, 0.0])
+    assert monthly["Rolling Return (%)"].to_list() == pytest.approx(
+        [-100.0, -100.0, -100.0]
+    )

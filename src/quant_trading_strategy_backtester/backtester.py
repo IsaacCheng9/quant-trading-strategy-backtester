@@ -538,16 +538,24 @@ class Backtester:
         total_turnover = float(self.results["trade_turnover"].cast(pl.Float64).sum())
         trade_events = float(self.results.filter(pl.col("trade_turnover") > 0).height)
 
-        # Measure the risk-adjusted return.
+        # Measure the risk-adjusted return. Zero out post-bankruptcy bars and
+        # floor the wipeout bar at -100% so wiped-out runs cannot score
+        # positive Sharpe or Sortino ratios.
         rf_daily = (1 + risk_free_return_rate_annual) ** (1 / TRADING_DAYS_PER_YEAR) - 1
+        prior_alive = (
+            self.results["cumulative_returns"].cast(pl.Float64).shift(1, fill_value=1.0)
+            > 0.0
+        )
+        effective_returns = self.results.select(
+            pl.when(prior_alive)
+            .then(pl.col("strategy_returns").cast(pl.Float64).clip(lower_bound=-1.0))
+            .otherwise(0.0)
+            .alias("effective_returns")
+        )["effective_returns"]
         strategy_returns_for_risk = (
-            self.results["strategy_returns"]
-            if include_initial_period
-            else self.results["strategy_returns"].slice(1)
+            effective_returns if include_initial_period else effective_returns.slice(1)
         )
-        excess_returns = _finite_values(
-            strategy_returns_for_risk.cast(pl.Float64) - rf_daily
-        )
+        excess_returns = _finite_values(strategy_returns_for_risk - rf_daily)
         sharpe_ratio = _calculate_sharpe_ratio(excess_returns)
         sortino_ratio = _calculate_sortino_ratio(excess_returns)
 
