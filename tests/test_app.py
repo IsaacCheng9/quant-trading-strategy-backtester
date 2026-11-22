@@ -1,6 +1,7 @@
 """Tests for Streamlit app helpers."""
 
 import datetime
+from typing import Any
 
 import polars as pl
 import pytest
@@ -11,9 +12,17 @@ from quant_trading_strategy_backtester.app import (
     _display_benchmark_comparison,
     _format_historical_sharpe,
     _get_benchmark_date_range,
+    _get_final_backtest_data,
     _get_prior_date,
     _get_strategy_store,
     _streamlit_progress,
+    prepare_pairs_trading_strategy_without_optimisation,
+    prepare_single_ticker_strategy,
+)
+from quant_trading_strategy_backtester.optimiser import (
+    WALK_FORWARD_FOLDS,
+    stitch_walk_forward_oos_results,
+    walk_forward_optimise,
 )
 from quant_trading_strategy_backtester.storage import (
     InMemoryStrategyStore,
@@ -348,3 +357,236 @@ def test_app_injects_cached_loaders_into_optimiser(
 
     assert captured["load_two_tickers"] is app._cached_load_yfinance_data_two_tickers
     assert captured["same_company_check"] is app._cached_is_same_company
+
+
+def test_get_final_backtest_data_walk_forward_returns_stitched_oos_slice(
+    monkeypatch,
+) -> None:
+    """Verify walk-forward final data covers all OOS folds and remainder."""
+    info_messages: list[str] = []
+    monkeypatch.setattr(app.st, "info", info_messages.append)
+
+    n_rows = 63
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    data = pl.DataFrame({"Date": dates, "Close": [100.0 + i for i in range(n_rows)]})
+
+    oos_data = _get_final_backtest_data(
+        data, use_validation_data=True, walk_forward=True
+    )
+
+    # 63 // 6 = 10 initial training rows; 53 stitched OOS rows across 5 folds.
+    assert len(oos_data) == 53
+    assert oos_data["Date"][0] == dates[10]
+    assert oos_data["Date"][-1] == dates[-1]
+    assert len(info_messages) == 1
+    assert "stitched walk-forward out-of-sample" in info_messages[0]
+    assert "53 rows" in info_messages[0]
+    assert f"{WALK_FORWARD_FOLDS} expanding folds" in info_messages[0]
+
+
+def test_prepare_single_ticker_strategy_returns_stitched_walk_forward_oos(
+    monkeypatch,
+) -> None:
+    """Verify walk-forward single-ticker prep retains stitched OOS output."""
+    n_rows = 90
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    data = pl.DataFrame(
+        {"Date": dates, "Close": [100.0 + i * 0.5 for i in range(n_rows)]}
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: data,
+    )
+
+    returned_data, ticker_display, best_params, walk_forward_oos = (
+        prepare_single_ticker_strategy(
+            "AAPL",
+            dates[0],
+            dates[-1],
+            "Moving Average Crossover",
+            {"short_window": [3, 5], "long_window": [10, 15]},
+            optimise=True,
+            walk_forward=True,
+        )
+    )
+
+    assert len(returned_data) == n_rows
+    assert ticker_display == "AAPL"
+    assert set(best_params.keys()) == {"short_window", "long_window"}
+    assert walk_forward_oos is not None
+    stitched_results, stitched_metrics = walk_forward_oos
+    # 90 // 6 = 15 initial training rows; 75 stitched OOS rows.
+    assert len(stitched_results) == 75
+    assert stitched_results["Date"][0] == dates[15]
+    assert stitched_results["Date"][-1] == dates[-1]
+    assert "Total Return" in stitched_metrics
+
+
+def test_prepare_pairs_strategy_without_auto_select_returns_stitched_walk_forward_oos(
+    monkeypatch,
+) -> None:
+    """Verify walk-forward manual pairs prep retains stitched OOS output."""
+    n_rows = 72
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    pair_data = pl.DataFrame(
+        {
+            "Date": dates,
+            "Close_1": [100.0 + i * 0.2 for i in range(n_rows)],
+            "Close_2": [200.0 + i * 0.4 for i in range(n_rows)],
+        }
+    )
+    expected_results = pl.DataFrame(
+        {
+            "Date": dates[12:],
+            "strategy_returns": [0.01] * 60,
+            "gross_strategy_returns": [0.01] * 60,
+            "transaction_costs": [0.0] * 60,
+            "trade_turnover": [0.0] * 60,
+            "cumulative_returns": [1.01] * 60,
+            "gross_cumulative_returns": [1.01] * 60,
+            "equity_curve": [101000.0] * 60,
+            "cumulative_transaction_costs": [0.0] * 60,
+        }
+    )
+    expected_metrics = {
+        "Total Return": 0.25,
+        "Sharpe Ratio": 1.4,
+        "Max Drawdown": -0.05,
+    }
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_two_tickers",
+        lambda *_args, **_kwargs: pair_data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app._display_cointegration_result",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.run_walk_forward_optimisation",
+        lambda *_args, **_kwargs: (
+            {"window": 10, "entry_z_score": 2.0, "exit_z_score": 0.5},
+            expected_results,
+            expected_metrics,
+        ),
+    )
+
+    _, ticker_display, best_params, walk_forward_oos = (
+        prepare_pairs_trading_strategy_without_optimisation(
+            ("AAPL", "MSFT"),
+            dates[0],
+            dates[-1],
+            {"window": [10], "entry_z_score": [2.0], "exit_z_score": [0.5]},
+            optimise=True,
+            walk_forward=True,
+        )
+    )
+
+    assert ticker_display == "AAPL vs. MSFT"
+    assert best_params == {"window": 10, "entry_z_score": 2.0, "exit_z_score": 0.5}
+    assert walk_forward_oos is not None
+    assert walk_forward_oos[0].equals(expected_results)
+    assert walk_forward_oos[1] == expected_metrics
+
+
+def test_main_displays_and_saves_stitched_walk_forward_results(monkeypatch) -> None:
+    """Verify app.main displays, plots, and saves stitched OOS results."""
+    n_rows = 90
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    data = pl.DataFrame(
+        {"Date": dates, "Close": [100.0 + i * 0.5 for i in range(n_rows)]}
+    )
+    param_ranges: dict[str, range | list[int | float]] = {
+        "short_window": [3, 5],
+        "long_window": [10, 15],
+    }
+    expected_params, expected_metrics, fold_results = walk_forward_optimise(
+        data,
+        "Moving Average Crossover",
+        param_ranges,
+        tickers="AAPL",
+    )
+    expected_results, _ = stitch_walk_forward_oos_results(fold_results)
+
+    captured: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_user_inputs_except_strategy_params",
+        lambda: ("AAPL", dates[0], dates[-1], "Moving Average Crossover", False),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_user_inputs_for_strategy_params",
+        lambda *_args, **_kwargs: (True, True, param_ranges),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
+        lambda *_args, **_kwargs: data,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_full_company_name",
+        lambda ticker: f"{ticker} Inc.",
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app._cached_evaluate_validation_period",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Walk-forward flow must not re-evaluate only the final fold"
+        ),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.display_performance_metrics",
+        lambda metrics, _company: captured.__setitem__("metrics", metrics),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app._display_benchmark_comparison",
+        lambda results, backtest_data: captured.update(
+            benchmark_rows=len(results), benchmark_data_rows=len(backtest_data)
+        ),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.plot_equity_curve",
+        lambda results, *_args, **_kwargs: captured.__setitem__(
+            "equity_results", results
+        ),
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.plot_strategy_returns",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.display_returns_by_month",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.display_trade_ledger",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.display_historical_results",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.Backtester.save_results",
+        lambda self, store=None: captured.update(
+            saved_data_rows=len(self.data),
+            saved_results_rows=len(self.results) if self.results is not None else 0,
+            saved_params=self.strategy.get_parameters(),
+        ),
+    )
+
+    app.main()
+
+    assert captured["metrics"] == pytest.approx(expected_metrics, nan_ok=True)
+    assert captured["equity_results"].equals(expected_results)
+    assert captured["benchmark_rows"] == len(expected_results)
+    assert captured["benchmark_data_rows"] == len(expected_results)
+    assert captured["saved_data_rows"] == len(expected_results)
+    assert captured["saved_results_rows"] == len(expected_results)
+    assert captured["saved_params"] == expected_params
