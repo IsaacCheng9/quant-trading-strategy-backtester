@@ -15,26 +15,47 @@ import yfinance as yf
 from quant_trading_strategy_backtester.utils import logger
 
 
+def _validate_date_range(start_date: datetime.date, end_date: datetime.date) -> None:
+    """Validate that start_date precedes end_date.
+
+    Args:
+        start_date: Inclusive start date for historical data.
+        end_date: Inclusive end date for historical data.
+
+    Raises:
+        ValueError: If start_date is on or after end_date.
+    """
+    if start_date >= end_date:
+        raise ValueError("start_date must be earlier than end_date")
+
+
 def load_yfinance_data_one_ticker(
     ticker: str, start_date: datetime.date, end_date: datetime.date
 ) -> pl.DataFrame:
-    """
-    Fetches adjusted historical stock data for a ticker from Yahoo Finance.
+    """Fetch adjusted historical stock data for one ticker from Yahoo Finance.
+
+    Advance end_date by one day when calling yfinance because Yahoo Finance
+    treats its end bound as exclusive, keeping end_date inclusive for callers.
 
     Args:
         ticker: The stock ticker symbol.
-        start_date: The start date for the data.
-        end_date: The end date for the data.
+        start_date: Inclusive start date for the data.
+        end_date: Inclusive end date for the data.
 
     Returns:
         A Polars DataFrame containing adjusted historical stock data.
+
+    Raises:
+        ValueError: If start_date is on or after end_date.
     """
-    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True)
+    _validate_date_range(start_date, end_date)
+    exclusive_end = end_date + datetime.timedelta(days=1)
+    data = yf.download(ticker, start=start_date, end=exclusive_end, auto_adjust=True)
     data = cast(pd.DataFrame, data)
-    # Handle MultiIndex columns by taking just the first level
+    # Handle MultiIndex columns by taking just the first level.
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
-    # Reset index to make Date a regular column
+    # Reset index to make Date a regular column.
     data = data.reset_index()
 
     return pl.from_pandas(data)
@@ -43,26 +64,35 @@ def load_yfinance_data_one_ticker(
 def load_yfinance_data_two_tickers(
     ticker1: str, ticker2: str, start_date: datetime.date, end_date: datetime.date
 ) -> pl.DataFrame:
-    """
-    Fetches adjusted historical stock data for two tickers from Yahoo Finance.
+    """Fetch adjusted historical stock data for two tickers from Yahoo Finance.
+
+    Advance end_date by one day when calling yfinance because Yahoo Finance
+    treats its end bound as exclusive, keeping end_date inclusive for callers.
 
     Args:
         ticker1: The first stock ticker symbol.
         ticker2: The second stock ticker symbol.
-        start_date: The start date for the data.
-        end_date: The end date for the data.
+        start_date: Inclusive start date for the data.
+        end_date: Inclusive end date for the data.
 
     Returns:
-        A Polars DataFrame containing adjusted historical stock data for both tickers.
+        A Polars DataFrame containing adjusted historical stock data for both
+        tickers.
+
+    Raises:
+        ValueError: If start_date is on or after end_date, if both tickers are
+            identical, or if yfinance returns malformed columns.
     """
+    _validate_date_range(start_date, end_date)
     ticker1 = ticker1.strip().upper()
     ticker2 = ticker2.strip().upper()
     if ticker1 == ticker2:
         raise ValueError("Ticker symbols must be different")
 
     # Download both tickers in one call for better performance.
+    exclusive_end = end_date + datetime.timedelta(days=1)
     data = yf.download(
-        [ticker1, ticker2], start=start_date, end=end_date, auto_adjust=True
+        [ticker1, ticker2], start=start_date, end=exclusive_end, auto_adjust=True
     )
     data = cast(pd.DataFrame, data)
     if data.empty:

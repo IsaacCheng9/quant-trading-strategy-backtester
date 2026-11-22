@@ -23,6 +23,8 @@ def test_load_yfinance_data_one_ticker(
 ) -> None:
     def mock_download(*args, **kwargs):
         assert kwargs["auto_adjust"] is True
+        assert kwargs["start"] == datetime.date(2020, 1, 1)
+        assert kwargs["end"] == datetime.date(2020, 2, 1)
         data = mock_yfinance_data.copy()
         data["Close"] = data["Adj Close"]
         return data.drop(columns=["Adj Close"]).set_index("Date")
@@ -45,6 +47,8 @@ def test_load_yfinance_data_two_tickers(
 ) -> None:
     def mock_download(*args, **kwargs):
         assert kwargs["auto_adjust"] is True
+        assert kwargs["start"] == datetime.date(2020, 1, 1)
+        assert kwargs["end"] == datetime.date(2020, 2, 1)
         # yfinance returns MultiIndex columns when downloading multiple
         # tickers.
         base_data = mock_yfinance_data.set_index("Date")
@@ -75,6 +79,31 @@ def test_load_yfinance_data_two_tickers(
     assert "Close_1" in data.columns
     assert "Close_2" in data.columns
     assert len(data) == 31
+
+
+@pytest.mark.parametrize(
+    "start_date,end_date",
+    [
+        (datetime.date(2020, 1, 15), datetime.date(2020, 1, 15)),
+        (datetime.date(2020, 1, 16), datetime.date(2020, 1, 15)),
+    ],
+)
+def test_load_yfinance_data_rejects_invalid_date_ranges(
+    monkeypatch,
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> None:
+    """Verify both yfinance loaders reject start_date >= end_date up front."""
+    monkeypatch.setattr(
+        "yfinance.download",
+        lambda *_args, **_kwargs: pytest.fail("yf.download should not be called"),
+    )
+
+    with pytest.raises(ValueError, match="start_date must be earlier than end_date"):
+        load_yfinance_data_one_ticker("AAPL", start_date, end_date)
+
+    with pytest.raises(ValueError, match="start_date must be earlier than end_date"):
+        load_yfinance_data_two_tickers("AAPL", "MSFT", start_date, end_date)
 
 
 def test_load_yfinance_data_two_tickers_preserves_requested_order(
