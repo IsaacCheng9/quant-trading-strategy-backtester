@@ -11,54 +11,99 @@ permissions:
 jobs:
   bump_version:
     if: ${{ !startsWith(github.event.head_commit.message, 'bump:') }}
+    concurrency:
+      group: version-main
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     name: Bump version with commitizen
     steps:
       - name: Check out
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
           token: "${{ secrets.GITHUB_TOKEN }}"
 
+      - name: Check whether main already has a version bump
+        id: check_head
+        run: |
+          HEAD_MSG=$(git log -1 --pretty=%s)
+          if [[ "$HEAD_MSG" == bump:* ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Latest main commit is already a version bump, skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
+        if: steps.check_head.outputs.skip != 'true'
         uses: actions/setup-python@v4
         with:
           python-version: "3.13"
 
       - name: Install uv
+        if: steps.check_head.outputs.skip != 'true'
         uses: astral-sh/setup-uv@main
 
       - name: Install commitizen
+        if: steps.check_head.outputs.skip != 'true'
         run: pip install commitizen
 
       - name: Bump version and update uv.lock file
+        if: steps.check_head.outputs.skip != 'true'
         run: |
-          # Configure git first
+          set -euo pipefail
+
+          # Configure git first.
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          # Run commitizen bump (updates files only, no commit).
-          # Exit code 21 means no bump-worthy commits - exit
-          # gracefully as a safety net for unmapped prefixes.
-          cz bump --yes --files-only || {
+          for attempt in 1 2 3; do
+            git fetch origin main --tags
+            git reset --hard origin/main
+
+            HEAD_MSG=$(git log -1 --pretty=%s)
+            if [[ "$HEAD_MSG" == bump:* ]]; then
+              echo "Latest main commit is already a version bump, skipping."
+              exit 0
+            fi
+
+            OLD_VERSION=$(grep -m 1 '^version = "' pyproject.toml | cut -d'"' -f2)
+
+            # Run commitizen bump (updates files only, no commit).
+            # Exit code 21 means no bump-worthy commits - exit
+            # gracefully as a safety net for unmapped prefixes.
+            set +e
+            cz bump --yes --files-only
             rc=$?
+            set -e
             if [ "$rc" -eq 21 ]; then
               echo "No bump-worthy commits found, skipping."
               exit 0
+            elif [ "$rc" -ne 0 ]; then
+              exit "$rc"
             fi
-            exit "$rc"
-          }
 
-          # Update lockfile to match new version
-          uv lock
+            # Update lockfile to match new version.
+            uv lock
 
-          # Get old and new versions for commit message
-          OLD_VERSION=$(git diff HEAD pyproject.toml | grep '^-version = ' | head -1 | cut -d'"' -f2)
-          NEW_VERSION=$(grep '^version = "' pyproject.toml | head -1 | cut -d'"' -f2)
+            NEW_VERSION=$(grep -m 1 '^version = "' pyproject.toml | cut -d'"' -f2)
 
-          # Commit both changes with arrow notation and create tag
-          git add pyproject.toml uv.lock
-          git commit -m "bump: version $OLD_VERSION → $NEW_VERSION"
-          git tag "$NEW_VERSION"
-          git push
-          git push --tags
+            # Commit both changes with arrow notation and create tag.
+            git add pyproject.toml uv.lock
+            git commit -m "bump: version $OLD_VERSION → $NEW_VERSION"
+            git tag "$NEW_VERSION"
+
+            if git push origin HEAD:main; then
+              git push origin "refs/tags/$NEW_VERSION"
+              exit 0
+            fi
+
+            # Another PR landed on main during the bump window - drop the local
+            # tag and retry against the updated main tip.
+            echo "Push raced with a newer commit on main (attempt $attempt/3); retrying..."
+            git tag -d "$NEW_VERSION"
+          done
+
+          echo "Failed to push version bump after 3 attempts."
+          exit 1
