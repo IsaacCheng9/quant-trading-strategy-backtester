@@ -94,6 +94,11 @@ strategy over 2020/01/01 to 2023/12/31.
 The full benchmark results can be found in the CSV files in the
 [resources folder](./resources).
 
+Note that these recorded 38,000-backtest (2.6x speedup) results are from the
+original pandas-to-Polars migration benchmark, prior to rolling OLS hedge ratios
+and invalid-parameter filtering (which leaves 170 valid parameter combinations
+per pair on `main`).
+
 ## Usage
 
 ### Installing Dependencies
