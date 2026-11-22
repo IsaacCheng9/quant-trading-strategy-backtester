@@ -3,16 +3,44 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Test](https://github.com/IsaacCheng9/quant-trading-strategy-backtester/actions/workflows/test.yml/badge.svg)](https://github.com/IsaacCheng9/quant-trading-strategy-backtester/actions/workflows/test.yml)
 
-A quantitative trading strategy backtester with an interactive dashboard.
-Enables users to implement, test, and visualise trading strategies using
-historical market data, featuring customisable parameters and key performance
-metrics. Developed with Python.
+A Polars-backed Python library for quantitative trading strategy backtesting and
+walk-forward optimisation, paired with an interactive Streamlit dashboard. The
+core modules (`backtester`, `data`, `optimiser`, `storage`, and `strategies`)
+have no Streamlit dependency and can be used directly from scripts or notebooks.
 
-_Try the deployed app
-[here on Streamlit Cloud!](https://quant-trading-strategy-backtester.streamlit.app/)_
+_Try the interactive Streamlit frontend
+[on Streamlit Cloud](https://quant-trading-strategy-backtester.streamlit.app/)._
+
+## Quickstart
+
+```python
+from datetime import date
+
+from quant_trading_strategy_backtester.backtester import Backtester
+from quant_trading_strategy_backtester.data import load_yfinance_data_one_ticker
+from quant_trading_strategy_backtester.optimiser import walk_forward_optimise
+from quant_trading_strategy_backtester.strategies.moving_average_crossover import (
+    MovingAverageCrossoverStrategy,
+)
+
+data = load_yfinance_data_one_ticker("AAPL", date(2020, 1, 1), date(2024, 1, 1))
+strategy = MovingAverageCrossoverStrategy({"short_window": 20, "long_window": 50})
+backtester = Backtester(data, strategy, initial_capital=100_000.0, tickers="AAPL")
+results = backtester.run()
+metrics = backtester.get_performance_metrics()
+
+best_params, oos_metrics, _ = walk_forward_optimise(
+    data,
+    "Moving Average Crossover",
+    {"short_window": range(10, 40, 10), "long_window": range(50, 200, 50)},
+    tickers="AAPL",
+)
+```
 
 ## Key Features
 
+- **Framework-free Python core** – `backtester`, `data`, `optimiser`, `storage`,
+  and `strategies` run without Streamlit
 - **Multiple trading strategies** – Buy and Hold, Mean Reversion, Moving Average
   Crossover, and Pairs Trading
 - **Walk-forward validation** – parameter optimisation with expanding training
@@ -29,8 +57,8 @@ _Try the deployed app
   annualised alpha, and information ratio for the displayed backtest period
 - **Efficient data processing** – vectorised computation using Polars for
   improved performance
-- **Interactive web-based dashboard** – Streamlit UI for strategy configuration,
-  backtesting, and analysis
+- **Interactive Streamlit frontend** – web UI for strategy configuration,
+  backtesting, and visual analysis
 - **Trade and spread visualisation** – equity curves with trade markers and
   pairs spread z-score charts with entry/exit threshold bands
 - **Performance metrics** – total return, Sharpe, Sortino, Calmar, drawdown
@@ -109,9 +137,10 @@ Run the following command from the [project root](./) directory:
 uv sync --all-extras --dev
 ```
 
-### Running the Application Locally
+### Running the Streamlit Frontend Locally
 
-Run the following command from the [project root](./) directory:
+To launch the interactive dashboard locally, run the following command from the
+[project root](./) directory:
 
 ```bash
 uv run streamlit run src/quant_trading_strategy_backtester/app.py
