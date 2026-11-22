@@ -121,7 +121,17 @@ def mock_yfinance_functions(monkeypatch):
             }
         )
 
-    # Mock all potential yfinance data loading functions
+    def mock_load_many_tickers(tickers, *args, **kwargs):
+        dates = pd.date_range(start="1/1/2020", end="1/31/2020")
+        columns: dict[str, Any] = {"Date": dates}
+        for idx, ticker in enumerate(tickers):
+            normalised = ticker.strip().upper()
+            columns[normalised] = [
+                100.0 + i * (0.1 + idx * 0.05) for i in range(len(dates))
+            ]
+        return pl.DataFrame(columns)
+
+    # Mock all potential yfinance data loading functions.
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.data.load_yfinance_data_one_ticker",
         mock_load_one_ticker,
@@ -129,6 +139,10 @@ def mock_yfinance_functions(monkeypatch):
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.data.load_yfinance_data_two_tickers",
         mock_load_two_tickers,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.data.load_yfinance_data_many_tickers",
+        mock_load_many_tickers,
     )
     monkeypatch.setattr(
         "quant_trading_strategy_backtester.app.load_yfinance_data_one_ticker",
@@ -139,20 +153,27 @@ def mock_yfinance_functions(monkeypatch):
         mock_load_two_tickers,
     )
     monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.load_yfinance_data_many_tickers",
+        mock_load_many_tickers,
+    )
+    monkeypatch.setattr(
         "quant_trading_strategy_backtester.optimiser.load_yfinance_data_one_ticker",
         mock_load_one_ticker,
     )
     monkeypatch.setattr(
-        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_two_tickers",
-        mock_load_two_tickers,
+        "quant_trading_strategy_backtester.optimiser.load_yfinance_data_many_tickers",
+        mock_load_many_tickers,
     )
 
-    from quant_trading_strategy_backtester import app
+    from quant_trading_strategy_backtester import app, data
 
-    # Clear Streamlit data caches so tests never see stale monkeypatched data.
+    # Clear data and Streamlit caches so tests never see stale state.
+    data.clear_data_caches()
     app._cached_load_yfinance_data_one_ticker.clear()
     app._cached_load_yfinance_data_two_tickers.clear()
+    app._cached_load_yfinance_data_many_tickers.clear()
     app._cached_get_top_sp500_companies.clear()
+    app._cached_get_sp500_company_ciks.clear()
     app._cached_get_full_company_name.clear()
     app._cached_is_same_company.clear()
     app._cached_run_backtest.clear()

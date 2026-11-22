@@ -14,7 +14,7 @@ import json
 import math
 import os
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
@@ -30,8 +30,10 @@ from quant_trading_strategy_backtester.benchmark import (
 from quant_trading_strategy_backtester.cointegration import evaluate_cointegration
 from quant_trading_strategy_backtester.data import (
     get_full_company_name,
+    get_sp500_company_ciks,
     get_top_sp500_companies,
     is_same_company,
+    load_yfinance_data_many_tickers,
     load_yfinance_data_one_ticker,
     load_yfinance_data_two_tickers,
 )
@@ -102,6 +104,16 @@ def _cached_load_yfinance_data_two_tickers(
 
 
 @st.cache_data
+def _cached_load_yfinance_data_many_tickers(
+    tickers: Sequence[str],
+    start_date: datetime.date,
+    end_date: datetime.date,
+) -> pl.DataFrame:
+    """Cache batched multi-ticker Yahoo Finance downloads across reruns."""
+    return load_yfinance_data_many_tickers(tickers, start_date, end_date)
+
+
+@st.cache_data
 def _cached_get_top_sp500_companies(
     num_companies: int,
 ) -> list[tuple[str, float]]:
@@ -116,9 +128,24 @@ def _cached_get_full_company_name(ticker: str) -> str | None:
 
 
 @st.cache_data
+def _cached_get_sp500_company_ciks() -> dict[str, str]:
+    """Cache Wikipedia S&P 500 ticker-to-CIK mappings across reruns."""
+    return get_sp500_company_ciks()
+
+
+def _get_sp500_company_ciks_cached() -> dict[str, str]:
+    """Return cached S&P 500 CIKs without retaining transient empty results."""
+    ciks = _cached_get_sp500_company_ciks()
+    if not ciks:
+        _cached_get_sp500_company_ciks.clear()
+    return ciks
+
+
+@st.cache_data
 def _cached_is_same_company(ticker1: str, ticker2: str) -> bool:
-    """Cache Yahoo Finance same-company checks across Streamlit reruns."""
-    return is_same_company(ticker1, ticker2)
+    """Cache same-company checks across Streamlit reruns."""
+    company_ciks = _get_sp500_company_ciks_cached()
+    return is_same_company(ticker1, ticker2, company_ciks=company_ciks)
 
 
 @contextmanager
@@ -729,7 +756,7 @@ def prepare_pairs_trading_strategy_with_optimisation(
             optimise,
             progress_callback=progress_callback,
             status_callback=_display_status_message,
-            load_two_tickers=_cached_load_yfinance_data_two_tickers,
+            load_many_tickers=_cached_load_yfinance_data_many_tickers,
             same_company_check=_cached_is_same_company,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,

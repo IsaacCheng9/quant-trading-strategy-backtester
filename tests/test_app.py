@@ -6,7 +6,7 @@ from typing import Any
 import polars as pl
 import pytest
 
-from quant_trading_strategy_backtester import app, optimiser, visualisation
+from quant_trading_strategy_backtester import app, data, optimiser, visualisation
 from quant_trading_strategy_backtester.app import (
     _build_save_key,
     _display_benchmark_comparison,
@@ -330,6 +330,7 @@ def test_app_injects_cached_loaders_into_optimiser(
 
     def fake_optimise_pairs(*args: object, **kwargs: object):
         captured["load_two_tickers"] = kwargs.get("load_two_tickers")
+        captured["load_many_tickers"] = kwargs.get("load_many_tickers")
         captured["same_company_check"] = kwargs.get("same_company_check")
         return (
             ("AAPL", "MSFT"),
@@ -362,8 +363,44 @@ def test_app_injects_cached_loaders_into_optimiser(
         optimise=False,
     )
 
-    assert captured["load_two_tickers"] is app._cached_load_yfinance_data_two_tickers
+    assert captured["load_two_tickers"] is None
+    assert captured["load_many_tickers"] is app._cached_load_yfinance_data_many_tickers
     assert captured["same_company_check"] is app._cached_is_same_company
+
+
+def test_cached_load_yfinance_data_many_tickers_caches_batch_downloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify _cached_load_yfinance_data_many_tickers caches repeated calls."""
+    calls: list[tuple[str, ...]] = []
+    expected = pl.DataFrame(
+        {
+            "Date": [datetime.date(2020, 1, 1), datetime.date(2020, 1, 2)],
+            "AAPL": [100.0, 101.0],
+            "MSFT": [200.0, 202.0],
+        }
+    )
+
+    def fake_load_many(tickers, start_date, end_date):
+        calls.append(tuple(tickers))
+        return expected
+
+    monkeypatch.setattr(app, "load_yfinance_data_many_tickers", fake_load_many)
+
+    first = app._cached_load_yfinance_data_many_tickers(
+        ("AAPL", "MSFT"),
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 3),
+    )
+    second = app._cached_load_yfinance_data_many_tickers(
+        ("AAPL", "MSFT"),
+        datetime.date(2020, 1, 1),
+        datetime.date(2020, 1, 3),
+    )
+
+    assert calls == [("AAPL", "MSFT")]
+    assert first.equals(expected)
+    assert second.equals(expected)
 
 
 def test_get_final_backtest_data_walk_forward_returns_stitched_oos_slice(
@@ -942,3 +979,60 @@ def test_prepare_single_ticker_strategy_buy_and_hold_ignores_optimise_flag(
     assert ticker_display == "AAPL"
     assert params == {}
     assert wf_oos is None
+
+
+def test_cached_is_same_company_uses_ciks_after_data_cache_clear(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify Streamlit-cached CIKs avoid Yahoo fallback after cache clear."""
+    fetch_calls = 0
+    cik_map = {
+        "GOOG": "0001652044",
+        "GOOGL": "0001652044",
+        "AAPL": "0000320193",
+        "MSFT": "0000789019",
+    }
+
+    def mock_get_ciks() -> dict[str, str]:
+        nonlocal fetch_calls
+        fetch_calls += 1
+        return dict(cik_map)
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_sp500_company_ciks",
+        mock_get_ciks,
+    )
+    monkeypatch.setattr(
+        "yfinance.Ticker",
+        lambda *_args, **_kwargs: pytest.fail(
+            "Should not query yfinance.Ticker when CIK mapping is available"
+        ),
+    )
+
+    # First check populates the Streamlit CIK cache.
+    assert app._cached_is_same_company("GOOG", "GOOGL") is True
+    assert fetch_calls == 1
+
+    # Clearing data.py caches must not trigger Yahoo fallback or a refetch.
+    data.clear_data_caches()
+    app._cached_is_same_company.clear()
+    assert app._cached_is_same_company("GOOG", "GOOGL") is True
+    assert app._cached_is_same_company("AAPL", "MSFT") is False
+    assert fetch_calls == 1
+
+
+def test_cached_cik_loader_does_not_stick_on_transient_empty_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify transient empty CIK lookups are cleared and retried later."""
+    responses = iter([{}, {"GOOG": "0001652044", "GOOGL": "0001652044"}])
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.app.get_sp500_company_ciks",
+        lambda: next(responses),
+    )
+
+    assert app._get_sp500_company_ciks_cached() == {}
+    assert app._get_sp500_company_ciks_cached() == {
+        "GOOG": "0001652044",
+        "GOOGL": "0001652044",
+    }
