@@ -17,9 +17,13 @@ from quant_trading_strategy_backtester.app import (
     prepare_pairs_trading_strategy_with_optimisation,
     prepare_single_ticker_strategy_with_optimisation,
 )
-from quant_trading_strategy_backtester.backtester import TRADING_DAYS_PER_YEAR
+from quant_trading_strategy_backtester.backtester import (
+    TRADING_DAYS_PER_YEAR,
+    build_trade_ledger,
+)
 from quant_trading_strategy_backtester.cointegration import CointegrationResult
 from quant_trading_strategy_backtester.optimiser import (
+    PortfolioPosition,
     _split_data,
     count_candidate_pairs,
     count_valid_parameter_combinations,
@@ -2386,3 +2390,617 @@ def test_optimise_pairs_trading_tickers_honours_load_two_tickers_override(
     )
 
     assert pair_calls == [("AAPL", "MSFT"), ("AAPL", "GOOGL"), ("MSFT", "GOOGL")]
+
+
+def _make_pairs_transition_data(n_rows: int = 36) -> pl.DataFrame:
+    """Build deterministic cointegrated pair prices with spread excursions."""
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    # Use oscillating Close_2 so rolling variance is always strictly positive
+    # and rolling OLS beta remains positive and well-conditioned.
+    close_2 = [100.0 + 2.0 * (i % 4) + 0.4 * i for i in range(n_rows)]
+    # Add spread deviations that trigger long and short entries across windows.
+    spread_offsets = [
+        0.2,
+        -0.2,
+        0.1,
+        -0.1,
+        0.2,
+        -0.1,
+        0.1,
+        -0.2,
+        0.15,
+        -0.15,
+        0.1,
+        -0.1,
+        0.05,
+        -0.05,
+        -4.0,
+        -6.0,
+        -8.0,
+        -10.0,
+        -0.5,
+        0.5,
+        5.0,
+        7.0,
+        9.0,
+        0.0,
+    ]
+    close_1 = [
+        1.5 * close_2[i] + spread_offsets[i % len(spread_offsets)]
+        for i in range(n_rows)
+    ]
+    return pl.DataFrame({"Date": dates, "Close_1": close_1, "Close_2": close_2})
+
+
+def test_evaluate_validation_period_reconciles_single_asset_fold_transition() -> None:
+    """Verify single-asset fold transitions earn prior return and pay costs."""
+    closes = [
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        110.0,
+        120.0,
+        130.0,
+        120.0,
+        115.0,
+        117.0,
+        110.0,
+    ]
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i)
+        for i in range(len(closes))
+    ]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+    tx_bps = 20.0
+    slip_bps = 10.0
+    cost_rate = (tx_bps + slip_bps) / 10_000
+
+    # Fold 1 (bars 6..9) uses window=3, which enters LONG (+1.0) on bar 9.
+    fold_1_params = {"window": 3, "std_dev": 0.5}
+    fold_1_results, _ = evaluate_validation_period(
+        data[:10],
+        data[6:10],
+        "Mean Reversion",
+        fold_1_params,
+        "TEST",
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    assert fold_1_results["signal"][-1] == pytest.approx(1.0)
+
+    # Fold 2 (bars 10..11) uses window=8, which was already SHORT (-1.0) on
+    # bar 9 and remains SHORT (-1.0) on bar 10.
+    fold_2_params = {"window": 8, "std_dev": 0.5}
+    unreconciled_results, _ = evaluate_validation_period(
+        data,
+        data[10:],
+        "Mean Reversion",
+        fold_2_params,
+        "TEST",
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    assert unreconciled_results["signal"][0] == pytest.approx(-1.0)
+    assert unreconciled_results["position_change"][0] == pytest.approx(0.0)
+    assert unreconciled_results["trade_turnover"][0] == pytest.approx(0.0)
+
+    prior_position = PortfolioPosition(signal=float(fold_1_results["signal"][-1]))
+    fold_2_results, fold_2_metrics = evaluate_validation_period(
+        data,
+        data[10:],
+        "Mean Reversion",
+        fold_2_params,
+        "TEST",
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+        prior_position=prior_position,
+    )
+
+    expected_asset_ret = (117.0 - 115.0) / 115.0
+    expected_gross_ret = 1.0 * expected_asset_ret
+    expected_cost = 2.0 * cost_rate
+    expected_net_ret = expected_gross_ret - expected_cost
+
+    assert fold_2_results["gross_strategy_returns"][0] == pytest.approx(
+        expected_gross_ret
+    )
+    assert fold_2_results["position_change"][0] == pytest.approx(-2.0)
+    assert fold_2_results["trade_turnover"][0] == pytest.approx(2.0)
+    assert fold_2_results["transaction_costs"][0] == pytest.approx(expected_cost)
+    assert fold_2_results["strategy_returns"][0] == pytest.approx(expected_net_ret)
+    assert fold_2_results["cumulative_returns"][0] == pytest.approx(
+        1.0 + expected_net_ret
+    )
+    assert fold_2_results["equity_curve"][0] == pytest.approx(
+        100_000.0 * (1.0 + expected_net_ret)
+    )
+    assert fold_2_metrics["Total Costs"] == pytest.approx(
+        float(fold_2_results["transaction_costs"].sum())
+    )
+    assert fold_2_metrics["Total Return"] == pytest.approx(
+        float(fold_2_results["cumulative_returns"][-1]) - 1.0
+    )
+
+    # Stitching and trade ledger must capture the boundary flip accurately.
+    stitched_results, _ = stitch_walk_forward_oos_results(
+        [
+            {"fold": 1, "oos_results": fold_1_results},
+            {"fold": 2, "oos_results": fold_2_results},
+        ],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    ledger = build_trade_ledger(stitched_results)
+    boundary_rows = ledger.filter(pl.col("Date") == dates[10])
+    assert boundary_rows.height == 1
+    assert boundary_rows["Action"][0] == "Flip Long To Short"
+    assert boundary_rows["Previous Signal"][0] == pytest.approx(1.0)
+    assert boundary_rows["Signal"][0] == pytest.approx(-1.0)
+    assert boundary_rows["Position Change"][0] == pytest.approx(-2.0)
+    assert boundary_rows["Turnover"][0] == pytest.approx(2.0)
+    assert boundary_rows["Gross Return"][0] == pytest.approx(expected_gross_ret)
+    assert boundary_rows["Transaction Costs"][0] == pytest.approx(expected_cost)
+    assert boundary_rows["Net Return"][0] == pytest.approx(expected_net_ret)
+
+
+def test_evaluate_validation_period_reconciles_pairs_fold_transition() -> None:
+    """Verify pairs fold transitions carry leg weights and charge costs."""
+    data = _make_pairs_transition_data(24)
+    tx_bps = 15.0
+    slip_bps = 5.0
+    cost_rate = (tx_bps + slip_bps) / 10_000
+
+    # Fold 1 (bars 12..19) ends LONG (+1.0) with window=5 entry-locked weights.
+    fold_1_params = {"window": 5, "entry_z_score": 1.0, "exit_z_score": 0.2}
+    fold_1_results, _ = evaluate_validation_period(
+        data[:20],
+        data[12:20],
+        "Pairs Trading",
+        fold_1_params,
+        ["A", "B"],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    assert fold_1_results["signal"][-1] == pytest.approx(1.0)
+    prior_w1 = float(fold_1_results["leg_1_weight"][-1])
+    prior_w2 = float(fold_1_results["leg_2_weight"][-1])
+    assert prior_w1 > 0.0
+    assert prior_w2 < 0.0
+
+    # Fold 2 (bars 20..23) uses window=8, which is also LONG (+1.0) on bar 20
+    # but with different entry-locked leg weights (and zero unreconciled
+    # turnover because window=8 was already LONG on bar 19).
+    fold_2_params = {"window": 8, "entry_z_score": 1.0, "exit_z_score": 0.2}
+    unreconciled_results, _ = evaluate_validation_period(
+        data,
+        data[20:],
+        "Pairs Trading",
+        fold_2_params,
+        ["A", "B"],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    assert unreconciled_results["trade_turnover"][0] == pytest.approx(0.0)
+
+    prior_pos = PortfolioPosition(
+        signal=float(fold_1_results["signal"][-1]),
+        leg_1_weight=prior_w1,
+        leg_2_weight=prior_w2,
+    )
+    fold_2_results, fold_2_metrics = evaluate_validation_period(
+        data,
+        data[20:],
+        "Pairs Trading",
+        fold_2_params,
+        ["A", "B"],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+        prior_position=prior_pos,
+    )
+
+    target_sig = float(fold_2_results["signal"][0])
+    target_w1 = float(fold_2_results["leg_1_weight"][0])
+    target_w2 = float(fold_2_results["leg_2_weight"][0])
+    assert target_sig == pytest.approx(1.0)
+    assert not math.isclose(target_w1, prior_w1, rel_tol=1e-9, abs_tol=1e-9)
+
+    a1_ret = (data["Close_1"][20] - data["Close_1"][19]) / data["Close_1"][19]
+    a2_ret = (data["Close_2"][20] - data["Close_2"][19]) / data["Close_2"][19]
+    expected_gross = prior_w1 * a1_ret + prior_w2 * a2_ret
+    expected_l1_change = target_w1 - prior_w1
+    expected_l2_change = target_w2 - prior_w2
+    expected_turnover = abs(expected_l1_change) + abs(expected_l2_change)
+    expected_cost = expected_turnover * cost_rate
+    expected_net = expected_gross - expected_cost
+
+    assert fold_2_results["gross_strategy_returns"][0] == pytest.approx(expected_gross)
+    assert fold_2_results["position_change"][0] == pytest.approx(0.0)
+    assert fold_2_results["leg_1_weight_change"][0] == pytest.approx(expected_l1_change)
+    assert fold_2_results["leg_2_weight_change"][0] == pytest.approx(expected_l2_change)
+    assert fold_2_results["trade_turnover"][0] == pytest.approx(expected_turnover)
+    assert fold_2_results["pair_turnover"][0] == pytest.approx(expected_turnover)
+    assert fold_2_results["transaction_costs"][0] == pytest.approx(expected_cost)
+    assert fold_2_results["strategy_returns"][0] == pytest.approx(expected_net)
+    assert fold_2_metrics["Total Costs"] == pytest.approx(
+        float(fold_2_results["transaction_costs"].sum())
+    )
+
+    # Verify stitched trade ledger records the leg-weight rebalance.
+    stitched_rebalance, _ = stitch_walk_forward_oos_results(
+        [
+            {"fold": 1, "params": fold_1_params, "oos_results": fold_1_results},
+            {"fold": 2, "params": fold_2_params, "oos_results": fold_2_results},
+        ],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    rebalance_ledger = build_trade_ledger(stitched_rebalance)
+    rebalance_rows = rebalance_ledger.filter(pl.col("Date") == data["Date"][20])
+    assert rebalance_rows.height == 1
+    assert rebalance_rows["Action"][0] == "Rebalance"
+    assert rebalance_rows["Turnover"][0] == pytest.approx(expected_turnover)
+    assert rebalance_rows["Transaction Costs"][0] == pytest.approx(expected_cost)
+
+    # Verify a signal flip across the boundary (SHORT prior -> LONG target).
+    flip_prior = PortfolioPosition(signal=-1.0, leg_1_weight=-0.6, leg_2_weight=0.4)
+    flip_results, _ = evaluate_validation_period(
+        data,
+        data[20:],
+        "Pairs Trading",
+        fold_2_params,
+        ["A", "B"],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+        prior_position=flip_prior,
+    )
+    flip_gross = -0.6 * a1_ret + 0.4 * a2_ret
+    flip_l1_change = target_w1 - (-0.6)
+    flip_l2_change = target_w2 - 0.4
+    flip_turnover = abs(flip_l1_change) + abs(flip_l2_change)
+    flip_cost = flip_turnover * cost_rate
+
+    assert flip_results["gross_strategy_returns"][0] == pytest.approx(flip_gross)
+    assert flip_results["position_change"][0] == pytest.approx(2.0)
+    assert flip_results["leg_1_weight_change"][0] == pytest.approx(flip_l1_change)
+    assert flip_results["leg_2_weight_change"][0] == pytest.approx(flip_l2_change)
+    assert flip_results["trade_turnover"][0] == pytest.approx(flip_turnover)
+    assert flip_results["pair_turnover"][0] == pytest.approx(flip_turnover)
+    assert flip_results["transaction_costs"][0] == pytest.approx(flip_cost)
+    assert flip_results["strategy_returns"][0] == pytest.approx(flip_gross - flip_cost)
+
+
+def test_walk_forward_identical_params_matches_continuous_backtest() -> None:
+    """Verify identical fold params produce zero spurious transition costs."""
+    tx_bps = 25.0
+    slip_bps = 10.0
+
+    # Single-asset continuity check with oscillating prices and active trades.
+    n_rows = 48
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(n_rows)
+    ]
+    closes = [100.0 + 8.0 * math.sin(i * 0.7) + 0.1 * i for i in range(n_rows)]
+    single_data = pl.DataFrame({"Date": dates, "Close": closes})
+    single_params = {"window": 4, "std_dev": 0.8}
+
+    _, wf_single_metrics, wf_single_folds = walk_forward_optimise(
+        single_data,
+        "Mean Reversion",
+        {"window": [4], "std_dev": [0.8]},
+        "TEST",
+        n_folds=3,
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    stitched_single, _ = stitch_walk_forward_oos_results(
+        wf_single_folds,
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    single_oos_data = get_walk_forward_oos_data(single_data, n_folds=3)
+    continuous_single, continuous_single_metrics = evaluate_validation_period(
+        single_data,
+        single_oos_data,
+        "Mean Reversion",
+        single_params,
+        "TEST",
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+
+    for col in (
+        "signal",
+        "position_change",
+        "gross_strategy_returns",
+        "trade_turnover",
+        "transaction_costs",
+        "strategy_returns",
+        "equity_curve",
+    ):
+        assert stitched_single[col].to_list() == pytest.approx(
+            continuous_single[col].to_list()
+        )
+    assert wf_single_metrics == pytest.approx(continuous_single_metrics, nan_ok=True)
+
+    # Pairs-trading continuity check with identical params across folds.
+    pairs_data = _make_pairs_transition_data(36)
+    pairs_params = {"window": 5, "entry_z_score": 1.0, "exit_z_score": 0.2}
+
+    _, wf_pairs_metrics, wf_pairs_folds = walk_forward_optimise(
+        pairs_data,
+        "Pairs Trading",
+        {"window": [5], "entry_z_score": [1.0], "exit_z_score": [0.2]},
+        ["A", "B"],
+        n_folds=3,
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    stitched_pairs, _ = stitch_walk_forward_oos_results(
+        wf_pairs_folds,
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    pairs_oos_data = get_walk_forward_oos_data(pairs_data, n_folds=3)
+    continuous_pairs, continuous_pairs_metrics = evaluate_validation_period(
+        pairs_data,
+        pairs_oos_data,
+        "Pairs Trading",
+        pairs_params,
+        ["A", "B"],
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+
+    for col in (
+        "signal",
+        "position_change",
+        "leg_1_weight",
+        "leg_2_weight",
+        "leg_1_weight_change",
+        "leg_2_weight_change",
+        "gross_strategy_returns",
+        "trade_turnover",
+        "pair_turnover",
+        "transaction_costs",
+        "strategy_returns",
+        "equity_curve",
+    ):
+        assert stitched_pairs[col].to_list() == pytest.approx(
+            continuous_pairs[col].to_list()
+        )
+    assert wf_pairs_metrics == pytest.approx(continuous_pairs_metrics, nan_ok=True)
+
+
+def test_walk_forward_optimise_threads_prior_position_across_folds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify walk_forward_optimise carries closing positions end-to-end."""
+    # 15 bars with n_folds=2 -> segment_size=5:
+    # train1=[0..5), test1=[5..10); train2=[0..10), test2=[10..15).
+    closes = [
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        110.0,
+        120.0,
+        130.0,
+        120.0,
+        115.0,
+        117.0,
+        110.0,
+        108.0,
+        106.0,
+        105.0,
+    ]
+    dates = [
+        datetime.date(2020, 1, 1) + datetime.timedelta(days=i)
+        for i in range(len(closes))
+    ]
+    data = pl.DataFrame({"Date": dates, "Close": closes})
+    tx_bps = 20.0
+    slip_bps = 10.0
+    cost_rate = (tx_bps + slip_bps) / 10_000
+
+    original_run_backtest = run_backtest
+    original_eval = evaluate_validation_period
+    received_prior_positions: list[PortfolioPosition | None] = []
+
+    def guided_run_backtest(
+        frame: pl.DataFrame,
+        strategy_type: str,
+        params: dict[str, Any],
+        tickers: str | list[str],
+        **kwargs: Any,
+    ) -> tuple[pl.DataFrame, dict[str, float]]:
+        results, metrics = original_run_backtest(
+            frame, strategy_type, params, tickers, **kwargs
+        )
+        # Steer fold 1 training (len 5) to pick window=3 (ends LONG on bar 9)
+        # and fold 2 training (len 10) to pick window=8 (SHORT on bars 9 & 10).
+        if len(frame) == 5:
+            metrics = dict(metrics)
+            metrics["Sharpe Ratio"] = 2.0 if params["window"] == 3 else 1.0
+        elif len(frame) == 10:
+            metrics = dict(metrics)
+            metrics["Sharpe Ratio"] = 2.0 if params["window"] == 8 else 1.0
+        return results, metrics
+
+    def spying_eval(*args: Any, **kwargs: Any) -> tuple[pl.DataFrame, dict[str, float]]:
+        received_prior_positions.append(kwargs.get("prior_position"))
+        return original_eval(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        guided_run_backtest,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        spying_eval,
+    )
+
+    best_params, stitched_metrics, fold_results = walk_forward_optimise(
+        data,
+        "Mean Reversion",
+        {"window": [3, 8], "std_dev": [0.5]},
+        "TEST",
+        n_folds=2,
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+
+    assert best_params == {"window": 8, "std_dev": 0.5}
+    assert fold_results[0]["params"] == {"window": 3, "std_dev": 0.5}
+    assert fold_results[1]["params"] == {"window": 8, "std_dev": 0.5}
+    assert fold_results[0]["oos_results"]["signal"][-1] == pytest.approx(1.0)
+    assert fold_results[1]["oos_results"]["signal"][0] == pytest.approx(-1.0)
+    assert received_prior_positions == [None, PortfolioPosition(signal=1.0)]
+
+    expected_asset_ret = (117.0 - 115.0) / 115.0
+    expected_cost = 2.0 * cost_rate
+    fold_2_oos = fold_results[1]["oos_results"]
+    assert fold_2_oos["gross_strategy_returns"][0] == pytest.approx(expected_asset_ret)
+    assert fold_2_oos["position_change"][0] == pytest.approx(-2.0)
+    assert fold_2_oos["trade_turnover"][0] == pytest.approx(2.0)
+    assert fold_2_oos["transaction_costs"][0] == pytest.approx(expected_cost)
+    assert fold_2_oos["strategy_returns"][0] == pytest.approx(
+        expected_asset_ret - expected_cost
+    )
+
+    stitched_results, recomputed_metrics = stitch_walk_forward_oos_results(
+        fold_results,
+        transaction_cost_bps=tx_bps,
+        slippage_bps=slip_bps,
+    )
+    assert stitched_metrics == pytest.approx(recomputed_metrics, nan_ok=True)
+    ledger = build_trade_ledger(stitched_results)
+    boundary_rows = ledger.filter(pl.col("Date") == dates[10])
+    assert boundary_rows.height == 1
+    assert boundary_rows["Action"][0] == "Flip Long To Short"
+    assert boundary_rows["Turnover"][0] == pytest.approx(2.0)
+
+
+def test_walk_forward_optimise_threads_pairs_leg_weights_across_folds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify walk_forward_optimise threads pairs leg weights between folds."""
+    pairs_data = _make_pairs_transition_data(24)
+    original_run_backtest = run_backtest
+    original_eval = evaluate_validation_period
+    received_prior_positions: list[PortfolioPosition | None] = []
+
+    def guided_run_backtest(
+        frame: pl.DataFrame,
+        strategy_type: str,
+        params: dict[str, Any],
+        tickers: str | list[str],
+        **kwargs: Any,
+    ) -> tuple[pl.DataFrame, dict[str, float]]:
+        results, metrics = original_run_backtest(
+            frame, strategy_type, params, tickers, **kwargs
+        )
+        # n_folds=2 on 24 rows -> train1=8 rows, train2=16 rows.
+        if len(frame) == 8:
+            metrics = dict(metrics)
+            metrics["Sharpe Ratio"] = 2.0 if params["window"] == 5 else 1.0
+        elif len(frame) == 16:
+            metrics = dict(metrics)
+            metrics["Sharpe Ratio"] = 2.0 if params["window"] == 8 else 1.0
+        return results, metrics
+
+    def spying_eval(*args: Any, **kwargs: Any) -> tuple[pl.DataFrame, dict[str, float]]:
+        received_prior_positions.append(kwargs.get("prior_position"))
+        return original_eval(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        guided_run_backtest,
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.evaluate_validation_period",
+        spying_eval,
+    )
+
+    _, _, fold_results = walk_forward_optimise(
+        pairs_data,
+        "Pairs Trading",
+        {"window": [5, 8], "entry_z_score": [1.0], "exit_z_score": [0.2]},
+        ["A", "B"],
+        n_folds=2,
+        transaction_cost_bps=15.0,
+        slippage_bps=5.0,
+    )
+
+    fold_1_oos = fold_results[0]["oos_results"]
+    fold_2_oos = fold_results[1]["oos_results"]
+    expected_prior = PortfolioPosition(
+        signal=float(fold_1_oos["signal"][-1]),
+        leg_1_weight=float(fold_1_oos["leg_1_weight"][-1]),
+        leg_2_weight=float(fold_1_oos["leg_2_weight"][-1]),
+    )
+    assert received_prior_positions == [None, expected_prior]
+    expected_turnover = abs(
+        float(fold_2_oos["leg_1_weight"][0]) - float(fold_1_oos["leg_1_weight"][-1])
+    ) + abs(
+        float(fold_2_oos["leg_2_weight"][0]) - float(fold_1_oos["leg_2_weight"][-1])
+    )
+    assert expected_turnover > 0.0
+    assert fold_2_oos["trade_turnover"][0] == pytest.approx(expected_turnover)
+    assert fold_2_oos["pair_turnover"][0] == pytest.approx(expected_turnover)
+
+
+def test_fold_transition_reconciliation_validates_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify invalid prior positions or missing columns raise ValueError."""
+    with pytest.raises(ValueError, match="signal must be finite"):
+        PortfolioPosition(signal=float("nan"))
+
+    with pytest.raises(ValueError, match="must both be set or both be None"):
+        PortfolioPosition(signal=1.0, leg_1_weight=0.5, leg_2_weight=None)
+
+    with pytest.raises(ValueError, match="leg_1_weight must be finite"):
+        PortfolioPosition(signal=1.0, leg_1_weight=float("inf"), leg_2_weight=-0.5)
+
+    pairs_data = _make_pairs_transition_data(20)
+    with pytest.raises(ValueError, match="leg_1_weight and leg_2_weight"):
+        evaluate_validation_period(
+            pairs_data,
+            pairs_data[14:],
+            "Pairs Trading",
+            {"window": 5, "entry_z_score": 1.0, "exit_z_score": 0.2},
+            ["A", "B"],
+            prior_position=PortfolioPosition(signal=1.0),
+        )
+
+    dates = [datetime.date(2020, 1, 1) + datetime.timedelta(days=i) for i in range(6)]
+    single_data = pl.DataFrame({"Date": dates, "Close": [100.0 + i for i in range(6)]})
+    incomplete_results = pl.DataFrame(
+        {
+            "Date": dates,
+            "signal": [1.0] * 6,
+            "position_change": [0.0] * 6,
+            "gross_strategy_returns": [0.0] * 6,
+            "trade_turnover": [0.0] * 6,
+            "transaction_costs": [0.0] * 6,
+            "strategy_returns": [0.0] * 6,
+        }
+    )
+    monkeypatch.setattr(
+        "quant_trading_strategy_backtester.optimiser.run_backtest",
+        lambda *_args, **_kwargs: (incomplete_results, {"Sharpe Ratio": 1.0}),
+    )
+    with pytest.raises(ValueError, match="asset_returns"):
+        evaluate_validation_period(
+            single_data,
+            single_data[3:],
+            "Buy and Hold",
+            {},
+            "TEST",
+            prior_position=PortfolioPosition(signal=0.0),
+        )
